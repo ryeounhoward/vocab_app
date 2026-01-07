@@ -11,9 +11,16 @@ class ManageDataPage extends StatefulWidget {
 }
 
 class _ManageDataPageState extends State<ManageDataPage> {
-  List<Map<String, dynamic>> _vocabList = [];
+  // Original data from DB
+  List<Map<String, dynamic>> _allVocab = [];
+  // Data displayed in the list (filtered)
+  List<Map<String, dynamic>> _filteredList = [];
+  
   final dbHelper = DBHelper();
   bool _isLoading = true;
+  
+  // Controller for the search field
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -25,8 +32,31 @@ class _ManageDataPageState extends State<ManageDataPage> {
     setState(() => _isLoading = true);
     final data = await dbHelper.queryAll();
     setState(() {
-      _vocabList = data;
+      _allVocab = data;
+      // Initialize filtered list with all data
+      _filteredList = data;
       _isLoading = false;
+    });
+    // If there was text in search bar, re-apply filter after refresh
+    _runFilter(_searchController.text);
+  }
+
+  // This function is called whenever the text field changes
+  void _runFilter(String enteredKeyword) {
+    List<Map<String, dynamic>> results = [];
+    if (enteredKeyword.isEmpty) {
+      // If the search field is empty, show all items
+      results = _allVocab;
+    } else {
+      // Filter based on the 'word' field
+      results = _allVocab
+          .where((item) =>
+              item["word"].toString().toLowerCase().contains(enteredKeyword.toLowerCase()))
+          .toList();
+    }
+
+    setState(() {
+      _filteredList = results;
     });
   }
 
@@ -58,104 +88,121 @@ class _ManageDataPageState extends State<ManageDataPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Loading State Consistency
     if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // 2. Empty State Consistency (No AppBar, Perfect Center)
-    if (_vocabList.isEmpty) {
-      return Scaffold(
-        body: const Center(
-          child: Text("No vocabulary found. Please add some first."),
-        ),
-        // We keep the FAB here so the user can actually add their first word
-        floatingActionButton: FloatingActionButton(
-          backgroundColor: Colors.indigo,
-          foregroundColor: Colors.white,
-          child: const Icon(Icons.add),
-          onPressed: () => _navigateToForm(null),
-        ),
-      );
-    }
-
-    // 3. Data Loaded State (Consistent tiles with Favorites Page)
     return Scaffold(
       appBar: AppBar(
         title: const Text("Manage Vocabulary"),
         elevation: 0,
         centerTitle: true,
+        // SEARCH BAR ADDED HERE
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (value) => _runFilter(value),
+              decoration: InputDecoration(
+                hintText: "Search word",
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty 
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        _runFilter('');
+                      },
+                    )
+                  : null,
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: _vocabList.length,
-        itemBuilder: (context, index) {
-          final item = _vocabList[index];
+      body: _allVocab.isEmpty 
+      ? const Center(child: Text("No vocabulary found. Please add some first."))
+      : _filteredList.isEmpty 
+          ? const Center(child: Text("No results found."))
+          : ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: _filteredList.length,
+              itemBuilder: (context, index) {
+                final item = _filteredList[index];
 
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
-              leading: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: item['image_path'] != null && item['image_path'] != ""
-                    ? Image.file(
-                        File(item['image_path']),
-                        width: 60,
-                        height: 60,
-                        fit: BoxFit.cover,
-                      )
-                    : Container(
-                        width: 60,
-                        height: 60,
-                        color: Colors.grey[200],
-                        child: const Icon(Icons.image, color: Colors.grey),
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: item['image_path'] != null && item['image_path'] != ""
+                          ? Image.file(
+                              File(item['image_path']),
+                              width: 60,
+                              height: 60,
+                              fit: BoxFit.cover,
+                            )
+                          : Container(
+                              width: 60,
+                              height: 60,
+                              color: Colors.grey[200],
+                              child: const Icon(Icons.image, color: Colors.grey),
+                            ),
+                    ),
+                    title: Text(
+                      item['word'] ?? "",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
                       ),
-              ),
-              title: Text(
-                item['word'] ?? "",
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-              subtitle: Text(
-                item['word_type'] ?? "",
-                style: const TextStyle(
-                  fontStyle: FontStyle.italic,
-                  color: Colors.indigo,
-                ),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.blue),
-                    onPressed: () => _navigateToForm(item),
+                    ),
+                    subtitle: Text(
+                      item['word_type'] ?? "",
+                      style: const TextStyle(
+                        fontStyle: FontStyle.italic,
+                        color: Colors.indigo,
+                      ),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _navigateToForm(item),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () {
+                            _confirmDelete(
+                              context,
+                              item['id'],
+                              item['word'] ?? "this word",
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () {
-                      _confirmDelete(
-                        context,
-                        item['id'],
-                        item['word'] ?? "this word",
-                      );
-                    },
-                  ),
-                ],
-              ),
+                );
+              },
             ),
-          );
-        },
-      ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
