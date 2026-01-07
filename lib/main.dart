@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pages/review_page.dart';
+import 'package:vocab_app/pages/menu_screen.dart';
 import 'pages/settings_page.dart';
 import 'pages/quiz_page.dart'; // Import the new page
 
@@ -30,7 +30,7 @@ class _MainContainerState extends State<MainContainer> {
 
   // FIX: Make sure there are 3 items here!
   final List<Widget> _pages = [
-    const ReviewPage(),
+    const MenuPage(),
     const QuizPage(),
     const SettingsPage(),
   ];

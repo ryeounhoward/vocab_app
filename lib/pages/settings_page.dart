@@ -25,6 +25,18 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+           ListTile(
+            leading: const Icon(Icons.edit, color: Colors.indigo),
+            title: const Text("Manage Idioms"),
+            subtitle: const Text("Add, edit, or delete your idioms"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ManageDataPage()),
+              );
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.star, color: Colors.orange),
             title: const Text("Favorites"),
