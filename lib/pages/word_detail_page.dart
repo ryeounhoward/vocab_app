@@ -75,7 +75,6 @@ class _WordDetailPageState extends State<WordDetailPage> {
     int newStatus = (currentItem['is_favorite'] == 1) ? 0 : 1;
     await dbHelper.toggleFavorite(currentItem['id'], newStatus == 1);
 
-    // Update local state so the star changes color immediately
     setState(() {
       currentItem = {...currentItem, 'is_favorite': newStatus};
     });
@@ -96,160 +95,164 @@ class _WordDetailPageState extends State<WordDetailPage> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
-        child: Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          elevation: 4,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Stack(
+        child: Column(
+          children: [
+            // --- THE CARD ---
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              elevation: 4,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child:
-                          currentItem['image_path'] != null &&
-                              currentItem['image_path'] != ""
-                          ? Image.file(
-                              File(currentItem['image_path']),
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              color: Colors.grey[200],
-                              child: const Icon(
-                                Icons.image,
-                                size: 80,
-                                color: Colors.grey,
-                              ),
-                            ),
-                    ),
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.3),
-                          shape: BoxShape.circle,
-                        ),
-                        child: IconButton(
-                          icon: Icon(
-                            isFav ? Icons.star : Icons.star_border,
-                            color: isFav ? Colors.yellow : Colors.white,
-                            size: 30,
-                          ),
-                          onPressed: _toggleFav,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(
-                                    text: "${currentItem['word'] ?? ''} ",
-                                    style: const TextStyle(
-                                      fontSize: 32,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  TextSpan(
-                                    text: "(${currentItem['word_type'] ?? ''})",
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      color: Colors.blueGrey,
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.volume_up,
-                              color: Colors.indigo,
-                              size: 30,
-                            ),
-                            onPressed: () => _speak(
-                              currentItem['word'] ?? "",
-                              currentItem['word_type'] ?? "",
-                              currentItem['description'] ?? "",
-                              examplesList,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 30),
-                      const Text(
-                        "Meaning",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.indigo,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        currentItem['description'] ??
-                            "No description provided.",
-                        style: const TextStyle(fontSize: 18, height: 1.4),
-                      ),
-                      const SizedBox(height: 25),
-                      if (examplesList.isNotEmpty) ...[
-                        const Text(
-                          "Examples",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.indigo,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        ...examplesList.map(
-                          (example) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  "• ",
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
+                    Stack(
+                      children: [
+                        AspectRatio(
+                          aspectRatio: 1,
+                          child: currentItem['image_path'] != null &&
+                                  currentItem['image_path'] != ""
+                              ? Image.file(
+                                  File(currentItem['image_path']),
+                                  fit: BoxFit.cover,
+                                )
+                              : Container(
+                                  color: Colors.grey[200],
+                                  child: const Icon(
+                                    Icons.image,
+                                    size: 80,
+                                    color: Colors.grey,
                                   ),
                                 ),
-                                Expanded(
-                                  child: Text(
-                                    example,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontStyle: FontStyle.italic,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                        ),
+                        Positioned(
+                          top: 10,
+                          right: 10,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.3),
+                              shape: BoxShape.circle,
+                            ),
+                            child: IconButton(
+                              icon: Icon(
+                                isFav ? Icons.star : Icons.star_border,
+                                color: isFav ? Colors.yellow : Colors.white,
+                                size: 30,
+                              ),
+                              onPressed: _toggleFav,
                             ),
                           ),
                         ),
                       ],
-                      const SizedBox(height: 20),
-                    ],
-                  ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text.rich(
+                                  TextSpan(
+                                    children: [
+                                      TextSpan(
+                                        text: "${currentItem['word'] ?? ''} ",
+                                        style: const TextStyle(
+                                          fontSize: 32,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      TextSpan(
+                                        text: "(${currentItem['word_type'] ?? ''})",
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          color: Colors.blueGrey,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.volume_up,
+                                  color: Colors.indigo,
+                                  size: 30,
+                                ),
+                                onPressed: () => _speak(
+                                  currentItem['word'] ?? "",
+                                  currentItem['word_type'] ?? "",
+                                  currentItem['description'] ?? "",
+                                  examplesList,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const Divider(height: 30),
+                          const Text(
+                            "Meaning",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            currentItem['description'] ??
+                                "No description provided.",
+                            style: const TextStyle(fontSize: 18, height: 1.4),
+                          ),
+                          const SizedBox(height: 25),
+                          if (examplesList.isNotEmpty) ...[
+                            const Text(
+                              "Examples",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.indigo,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ...examplesList.map(
+                              (example) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      "• ",
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        example,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontStyle: FontStyle.italic,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(height: 50),
+          ],
         ),
       ),
     );

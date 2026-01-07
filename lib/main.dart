@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'pages/manage_data_page.dart';
 import 'pages/review_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/quiz_page.dart'; // Import the new page
@@ -31,7 +30,6 @@ class _MainContainerState extends State<MainContainer> {
 
   // FIX: Make sure there are 3 items here!
   final List<Widget> _pages = [
-    const ManageDataPage(),
     const ReviewPage(),
     const QuizPage(),
     const SettingsPage(),
@@ -47,7 +45,6 @@ class _MainContainerState extends State<MainContainer> {
         onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed, // Required for 3+ items
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.edit), label: 'Manage Data'),
           BottomNavigationBarItem(
             icon: Icon(Icons.rate_review),
             label: 'Review',
@@ -55,7 +52,7 @@ class _MainContainerState extends State<MainContainer> {
           BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Practice'),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
-            label: 'Settings',
+            label: 'Preferences',
           ),
         ],
       ),

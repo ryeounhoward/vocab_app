@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/favorite_page.dart';
+import 'package:vocab_app/pages/manage_data_page.dart';
 import 'voice_selection_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -11,6 +12,18 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text("Settings"), centerTitle: true),
       body: ListView(
         children: [
+           ListTile(
+            leading: const Icon(Icons.edit, color: Colors.indigo),
+            title: const Text("Manage Vocabulary"),
+            subtitle: const Text("Add, edit, or delete your words"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ManageDataPage()),
+              );
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.star, color: Colors.orange),
             title: const Text("Favorites"),
@@ -37,6 +50,7 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+
         ],
       ),
     );
