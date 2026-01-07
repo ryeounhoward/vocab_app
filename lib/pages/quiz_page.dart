@@ -15,7 +15,12 @@ class _QuizPageState extends State<QuizPage> {
   final FlutterTts flutterTts = FlutterTts();
   List<Map<String, dynamic>> _vocabList = [];
   bool _isLoading = true;
-  int? _flippedIndex;
+  int? _flippedIndex; // This will track the absolute PageView index
+  
+  // 1. Define a PageController
+  PageController? _pageController;
+  // A large number to simulate infinity
+  final int _loopSeparator = 10000; 
 
   @override
   void initState() {
@@ -42,15 +47,27 @@ class _QuizPageState extends State<QuizPage> {
   @override
   void dispose() {
     flutterTts.stop();
+    _pageController?.dispose(); // Dispose controller
     super.dispose();
   }
 
   void _loadData() async {
     final data = await dbHelper.queryAll();
     List<Map<String, dynamic>> shuffledList = List.from(data);
-    shuffledList.shuffle();
+    shuffledList.shuffle(); // 2. Shuffle the list
+    
     setState(() {
       _vocabList = shuffledList;
+      
+      // 3. Initialize controller at a high multiple of the list length
+      // This allows swiping left immediately.
+      if (_vocabList.isNotEmpty) {
+        int initialPage = _vocabList.length * (_loopSeparator ~/ 2);
+        _pageController = PageController(
+          viewportFraction: 0.85,
+          initialPage: initialPage,
+        );
+      }
       _isLoading = false;
     });
   }
@@ -65,8 +82,9 @@ class _QuizPageState extends State<QuizPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading)
+    if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     if (_vocabList.isEmpty) {
       return const Scaffold(
@@ -91,16 +109,19 @@ class _QuizPageState extends State<QuizPage> {
             ),
             Expanded(
               child: PageView.builder(
-                itemCount: _vocabList.length,
-                controller: PageController(viewportFraction: 0.85),
+                // 4. Set a very high item count for infinite looping
+                itemCount: _vocabList.length * _loopSeparator,
+                controller: _pageController,
                 onPageChanged: (index) {
                   setState(() {
-                    _flippedIndex = null;
+                    _flippedIndex = null; // Reset flip state on swipe
                     flutterTts.stop();
                   });
                 },
                 itemBuilder: (context, index) {
-                  final item = _vocabList[index];
+                  // 5. Use modulo to map the large index back to the list range
+                  final actualIndex = index % _vocabList.length;
+                  final item = _vocabList[actualIndex];
                   bool isThisCardFlipped = _flippedIndex == index;
 
                   return GestureDetector(
@@ -126,6 +147,7 @@ class _QuizPageState extends State<QuizPage> {
     );
   }
 
+  // --- KEEPING YOUR EXACT CARD DESIGN ---
   Widget _buildFlipCard(Map<String, dynamic> item, bool isFlipped) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 400),
@@ -148,7 +170,6 @@ class _QuizPageState extends State<QuizPage> {
           ? _buildCardSide(
               key: const ValueKey(true),
               content: item['word'] ?? "No word",
-              // Changed item['type'] to item['word_type']
               subContent: item['word_type'] != null && item['word_type'] != ""
                   ? "(${item['word_type']})"
                   : null,
@@ -183,7 +204,6 @@ class _QuizPageState extends State<QuizPage> {
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
-            // ignore: deprecated_member_use
             color: Colors.black.withOpacity(0.1),
             blurRadius: 15,
             offset: const Offset(0, 8),
@@ -196,7 +216,6 @@ class _QuizPageState extends State<QuizPage> {
             top: 10,
             right: 10,
             child: IconButton(
-              // ignore: deprecated_member_use
               icon: Icon(Icons.volume_up, color: textColor.withOpacity(0.6)),
               onPressed: () => _speak(content),
             ),
@@ -225,7 +244,6 @@ class _QuizPageState extends State<QuizPage> {
                         fontSize: 16,
                         fontWeight: FontWeight.w400,
                         fontStyle: FontStyle.italic,
-                        // ignore: deprecated_member_use
                         color: textColor.withOpacity(0.7),
                       ),
                     ),
