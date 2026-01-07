@@ -52,7 +52,7 @@ class _MainContainerState extends State<MainContainer> {
           BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Practice'),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
-            label: 'Preferences',
+            label: 'Settings',
           ),
         ],
       ),

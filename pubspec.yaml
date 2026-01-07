@@ -37,6 +37,9 @@ dependencies:
   http: ^1.6.0
   flutter_tts: ^4.2.5
   shared_preferences: ^2.5.4
+  file_picker: ^10.3.8
+  share_plus: ^12.0.1
+  external_path: ^1.0.3
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
