@@ -83,4 +83,9 @@ class DBHelper {
       whereArgs: [id],
     );
   }
+
+  Future<void> clearAllData() async {
+    Database dbClient = await db;
+    await dbClient.delete("vocabulary");
+  }
 }

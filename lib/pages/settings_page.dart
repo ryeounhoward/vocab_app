@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/favorite_page.dart';
 import 'package:vocab_app/pages/manage_data_page.dart';
+import 'package:vocab_app/pages/backup_restore_page.dart';
 import 'voice_selection_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -50,6 +51,18 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+          ListTile(
+          leading: const Icon(Icons.backup, color: Colors.teal),
+          title: const Text("Backup & Restore"),
+          subtitle: const Text("Export or Import your data via JSON"),
+          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const BackupRestorePage()),
+            );
+          },
+        ),
 
         ],
       ),
