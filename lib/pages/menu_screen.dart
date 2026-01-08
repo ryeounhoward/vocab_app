@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:vocab_app/pages/idoms_page.dart';
+import 'package:vocab_app/pages/idiom_review_page.dart';
 import 'review_page.dart';
 
 class MenuPage extends StatelessWidget {
@@ -9,42 +9,40 @@ class MenuPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Study Menu"),
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          // TOP CARD: VOCABULARY
-          Expanded(
-            child: MenuCard(
-              title: "Vocabulary",
-              imagePath: "assets/vocabulary.jpg", // Replace with your asset path
-              color: Colors.blueAccent,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const ReviewPage()),
-                );
-              },
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: MenuCard(
+                title: "Words",
+                imagePath: "assets/images/vocabulary.jpg",
+                color: Colors.blueAccent,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ReviewPage()),
+                  );
+                },
+              ),
             ),
-          ),
-          
-          // BOTTOM CARD: IDIOMS
-          Expanded(
-            child: MenuCard(
-              title: "Idioms",
-              imagePath: "assets/idioms.jpg", // Replace with your asset path
-              color: Colors.orangeAccent,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const IdiomsPage()),
-                );
-              },
+
+            Expanded(
+              child: MenuCard(
+                title: "Idioms",
+                imagePath: "assets/images/idioms.jpg",
+                color: Colors.orangeAccent,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const IdiomReviewPage(),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -77,7 +75,7 @@ class MenuCard extends StatelessWidget {
               color: Colors.black.withOpacity(0.2),
               blurRadius: 10,
               offset: const Offset(0, 5),
-            )
+            ),
           ],
         ),
         child: ClipRRect(
@@ -85,15 +83,11 @@ class MenuCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Background Image (Placeholder used if asset missing)
-              Image.network(
-                "https://via.placeholder.com/400x200?text=$title", // Replace with Image.asset(imagePath)
-                fit: BoxFit.cover,
-              ),
+              // Background Image
+              Image.asset(imagePath, fit: BoxFit.cover),
               // Overlay for readability
-              Container(
-                color: Colors.black.withOpacity(0.4),
-              ),
+              // ignore: deprecated_member_use
+              Container(color: Colors.black.withOpacity(0.4)),
               // Title Text
               Center(
                 child: Text(

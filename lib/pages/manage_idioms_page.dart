@@ -1,26 +1,26 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../database/db_helper.dart';
-import 'add_edit_page.dart';
+import 'add_edit_idiom_page.dart';
 
-class ManageDataPage extends StatefulWidget {
-  const ManageDataPage({super.key});
+class ManageIdiomsPage extends StatefulWidget {
+  const ManageIdiomsPage({super.key});
 
   @override
-  State<ManageDataPage> createState() => _ManageDataPageState();
+  State<ManageIdiomsPage> createState() => _ManageIdiomsPageState();
 }
 
-class _ManageDataPageState extends State<ManageDataPage> {
-  // Original data from DB
-  List<Map<String, dynamic>> _allVocab = [];
-  // Data displayed in the list (filtered)
+class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
+  List<Map<String, dynamic>> _allIdioms = [];
   List<Map<String, dynamic>> _filteredList = [];
 
   final dbHelper = DBHelper();
   bool _isLoading = true;
-
-  // Controller for the search field
   final TextEditingController _searchController = TextEditingController();
+
+  // Keep track of keys for each item to control them from here
+  final Map<int, GlobalKey<SlidingTitleState>> _titleKeys = {};
+  GlobalKey<SlidingTitleState>? _activeKey;
 
   @override
   void initState() {
@@ -30,56 +30,56 @@ class _ManageDataPageState extends State<ManageDataPage> {
 
   void _refreshData() async {
     setState(() => _isLoading = true);
-    final data = await dbHelper.queryAll();
-    setState(() {
-      _allVocab = data;
-      // Initialize filtered list with all data
-      _filteredList = data;
-      _isLoading = false;
-    });
-    // If there was text in search bar, re-apply filter after refresh
-    _runFilter(_searchController.text);
+    try {
+      final data = await dbHelper.queryAll(DBHelper.tableIdioms);
+      setState(() {
+        _allIdioms = data;
+        _filteredList = data;
+      });
+    } catch (e) {
+      debugPrint("DATABASE ERROR: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  // This function is called whenever the text field changes
   void _runFilter(String enteredKeyword) {
     List<Map<String, dynamic>> results = [];
     if (enteredKeyword.isEmpty) {
-      // If the search field is empty, show all items
-      results = _allVocab;
+      results = _allIdioms;
     } else {
-      // Filter based on the 'word' field
-      results = _allVocab
+      results = _allIdioms
           .where(
-            (item) => item["word"].toString().toLowerCase().contains(
+            (item) => item["idiom"].toString().toLowerCase().contains(
               enteredKeyword.toLowerCase(),
             ),
           )
           .toList();
     }
-
-    setState(() {
-      _filteredList = results;
-    });
+    setState(() => _filteredList = results);
   }
 
-  Future<void> _confirmDelete(BuildContext context, int id, String word) async {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    int id,
+    String idiom,
+  ) async {
     return showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text("Confirm Delete"),
-          content: Text("Are you sure you want to delete '$word'?"),
+          content: Text("Are you sure you want to delete '$idiom'?"),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.pop(context),
               child: const Text("CANCEL"),
             ),
             TextButton(
               onPressed: () async {
-                await dbHelper.delete(id);
+                await dbHelper.delete(id, DBHelper.tableIdioms);
                 _refreshData();
-                if (mounted) Navigator.of(context).pop();
+                if (mounted) Navigator.pop(context);
               },
               child: const Text("DELETE", style: TextStyle(color: Colors.red)),
             ),
@@ -97,17 +97,16 @@ class _ManageDataPageState extends State<ManageDataPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Manage Vocabulary"),
+        title: const Text("Manage Idioms"),
         elevation: 0,
         centerTitle: true,
-        // SEARCH BAR ADDED HERE
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
               controller: _searchController,
-              onChanged: (value) => _runFilter(value),
+              onChanged: _runFilter,
               decoration: InputDecoration(
                 hintText: "Search",
                 prefixIcon: const Icon(Icons.search),
@@ -132,37 +131,54 @@ class _ManageDataPageState extends State<ManageDataPage> {
           ),
         ),
       ),
-      body: _allVocab.isEmpty
-          ? const Center(
-              child: Text("No vocabulary found. Please add some first."),
-            )
+      body: _allIdioms.isEmpty
+          ? const Center(child: Text("No idioms found. Please add some first."))
           : _filteredList.isEmpty
           ? const Center(child: Text("No results found."))
           : ListView.builder(
               padding: const EdgeInsets.all(12),
-              // 1. Add +1 to the length
               itemCount: _filteredList.length + 1,
               itemBuilder: (context, index) {
-                // 2. Check if this is the very last item in the count
                 if (index == _filteredList.length) {
-                  return const SizedBox(
-                    height: 80,
-                  ); // This appears AFTER the last card
+                  return const SizedBox(height: 80); // Space after last card
                 }
 
                 final item = _filteredList[index];
+                final int itemId = item['id'];
+
+                // Retrieve or create a GlobalKey for this specific idiom ID
+                final titleKey = _titleKeys.putIfAbsent(
+                  itemId,
+                  () => GlobalKey<SlidingTitleState>(),
+                );
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   elevation: 2,
+                  clipBehavior: Clip.antiAlias,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
                   child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
                     ),
+                    onTap: () {
+                      // 1. If another card is already scrolling, reset it first
+                      if (_activeKey != null && _activeKey != titleKey) {
+                        _activeKey?.currentState?.resetScroll();
+                      }
+
+                      // 2. Toggle scroll on the current card (handles "click again to reset")
+                      titleKey.currentState?.toggleScroll();
+
+                      // 3. Update the active key reference
+                      _activeKey = titleKey;
+                    },
                     leading: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child:
@@ -183,16 +199,13 @@ class _ManageDataPageState extends State<ManageDataPage> {
                               ),
                             ),
                     ),
-                    title: Text(
-                      item['word'] ?? "",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
+                    title: SlidingTitle(
+                      key: titleKey,
+                      text: item['idiom'] ?? "",
                     ),
-                    subtitle: Text(
-                      item['word_type'] ?? "",
-                      style: const TextStyle(
+                    subtitle: const Text(
+                      "Idiom",
+                      style: TextStyle(
                         fontStyle: FontStyle.italic,
                         color: Colors.indigo,
                       ),
@@ -206,13 +219,11 @@ class _ManageDataPageState extends State<ManageDataPage> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            _confirmDelete(
-                              context,
-                              item['id'],
-                              item['word'] ?? "this word",
-                            );
-                          },
+                          onPressed: () => _confirmDelete(
+                            context,
+                            itemId,
+                            item['idiom'] ?? "this idiom",
+                          ),
                         ),
                       ],
                     ),
@@ -232,8 +243,90 @@ class _ManageDataPageState extends State<ManageDataPage> {
   void _navigateToForm(Map<String, dynamic>? item) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => AddEditPage(vocabItem: item)),
+      MaterialPageRoute(
+        builder: (context) => AddEditIdiomPage(idiomItem: item),
+      ),
     );
     _refreshData();
+  }
+}
+
+class SlidingTitle extends StatefulWidget {
+  final String text;
+  const SlidingTitle({super.key, required this.text});
+
+  @override
+  State<SlidingTitle> createState() => SlidingTitleState();
+}
+
+class SlidingTitleState extends State<SlidingTitle> {
+  final ScrollController _scrollController = ScrollController();
+  bool _isScrolling = false;
+
+  /// Resets the scroll position immediately to normal
+  void resetScroll() {
+    if (!mounted) return;
+    _scrollController.jumpTo(0);
+    setState(() => _isScrolling = false);
+  }
+
+  /// Starts scrolling or resets if already scrolling
+  void toggleScroll() {
+    if (_isScrolling) {
+      resetScroll();
+    } else {
+      _startScrolling();
+    }
+  }
+
+  void _startScrolling() async {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.maxScrollExtent <= 0) return;
+
+    setState(() => _isScrolling = true);
+
+    // Faster speed: 60ms per character
+    int durationMs = (widget.text.length * 60).toInt();
+    if (durationMs < 600) durationMs = 600;
+
+    await _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: Duration(milliseconds: durationMs),
+      curve: Curves.linear,
+    );
+
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    // Return to start
+    if (_isScrolling && mounted) {
+      await _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOut,
+      );
+      if (mounted) setState(() => _isScrolling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      controller: _scrollController,
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      child: Text(
+        widget.text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: _isScrolling ? TextOverflow.visible : TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 }

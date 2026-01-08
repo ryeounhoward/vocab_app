@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/favorite_page.dart';
 import 'package:vocab_app/pages/manage_data_page.dart';
 import 'package:vocab_app/pages/backup_restore_page.dart';
+import 'package:vocab_app/pages/manage_idioms_page.dart';
 import 'voice_selection_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -13,7 +14,7 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text("Settings"), centerTitle: true),
       body: ListView(
         children: [
-           ListTile(
+          ListTile(
             leading: const Icon(Icons.edit, color: Colors.indigo),
             title: const Text("Manage Vocabulary"),
             subtitle: const Text("Add, edit, or delete your words"),
@@ -25,7 +26,7 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
-           ListTile(
+          ListTile(
             leading: const Icon(Icons.edit, color: Colors.indigo),
             title: const Text("Manage Idioms"),
             subtitle: const Text("Add, edit, or delete your idioms"),
@@ -33,7 +34,9 @@ class SettingsPage extends StatelessWidget {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const ManageDataPage()),
+                MaterialPageRoute(
+                  builder: (context) => const ManageIdiomsPage(),
+                ),
               );
             },
           ),
@@ -64,18 +67,19 @@ class SettingsPage extends StatelessWidget {
             },
           ),
           ListTile(
-          leading: const Icon(Icons.backup, color: Colors.teal),
-          title: const Text("Backup & Restore"),
-          subtitle: const Text("Export or Import your data via JSON"),
-          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const BackupRestorePage()),
-            );
-          },
-        ),
-
+            leading: const Icon(Icons.backup, color: Colors.teal),
+            title: const Text("Backup & Restore"),
+            subtitle: const Text("Export or Import your data via JSON"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const BackupRestorePage(),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

@@ -1,38 +1,39 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import '../database/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'search_page.dart';
+import '../database/db_helper.dart';
+import 'search_page_idiom.dart'; // Ensure this path is correct
 
-class ReviewPage extends StatefulWidget {
-  final int? selectedId;
-  final String? originTable;
+class IdiomReviewPage extends StatefulWidget {
+  final int? selectedId; // Used when navigating from Search results
 
-  const ReviewPage({super.key, this.selectedId, this.originTable});
+  const IdiomReviewPage({super.key, this.selectedId});
 
   @override
-  State<ReviewPage> createState() => _ReviewPageState();
+  State<IdiomReviewPage> createState() => _IdiomReviewPageState();
 }
 
-class _ReviewPageState extends State<ReviewPage> {
+class _IdiomReviewPageState extends State<IdiomReviewPage> {
   final dbHelper = DBHelper();
   final FlutterTts flutterTts = FlutterTts();
-  List<Map<String, dynamic>> _vocabList = [];
+  List<Map<String, dynamic>> _idiomList = [];
   bool _isLoading = true;
   PageController? _pageController;
 
   @override
   void initState() {
     super.initState();
+    _loadData();
     _initTts();
-    _loadAndShuffle();
   }
 
+  // --- TTS INITIALIZATION ---
   void _initTts() async {
     final prefs = await SharedPreferences.getInstance();
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
+
     if (voiceName != null && voiceLocale != null) {
       await flutterTts.setVoice({"name": voiceName, "locale": voiceLocale});
     } else {
@@ -42,13 +43,25 @@ class _ReviewPageState extends State<ReviewPage> {
     await flutterTts.setSpeechRate(0.5);
   }
 
-  void _loadAndShuffle() async {
-    // ONLY vocabulary words
-    final data = await dbHelper.queryAll(DBHelper.tableVocab);
+  @override
+  void dispose() {
+    flutterTts.stop();
+    _pageController?.dispose();
+    super.dispose();
+  }
+
+  // --- LOAD DATA & SHUFFLE ---
+  void _loadData() async {
+    setState(() => _isLoading = true);
+
+    // Query idioms table specifically
+    final data = await dbHelper.queryAll(DBHelper.tableIdioms);
     List<Map<String, dynamic>> shuffledData = List.from(data);
-    shuffledData.shuffle();
+    shuffledData.shuffle(); // Shuffle the entire database for review
 
     int targetIndex = 0;
+
+    // If we came from search, find where that specific idiom is in our shuffled list
     if (widget.selectedId != null) {
       targetIndex = shuffledData.indexWhere(
         (item) => item['id'] == widget.selectedId,
@@ -57,10 +70,11 @@ class _ReviewPageState extends State<ReviewPage> {
     }
 
     setState(() {
-      _vocabList = shuffledData;
+      _idiomList = shuffledData;
       _isLoading = false;
-      if (_vocabList.isNotEmpty) {
-        int initialPage = (_vocabList.length * 100) + targetIndex;
+      if (_idiomList.isNotEmpty) {
+        // infinite loop start point + the target index from search
+        int initialPage = (_idiomList.length * 100) + targetIndex;
         _pageController = PageController(
           viewportFraction: 0.93,
           initialPage: initialPage,
@@ -69,89 +83,90 @@ class _ReviewPageState extends State<ReviewPage> {
     });
   }
 
-  @override
-  void dispose() {
-    flutterTts.stop();
-    _pageController?.dispose();
-    super.dispose();
-  }
+  // --- DIRECT SPEECH LOGIC ---
+  Future<void> _speak(String idiom, String desc, List<String> examples) async {
+    await flutterTts.stop();
 
-  Future<void> _speak(
-    String word,
-    String type,
-    String desc,
-    List<String> examples,
-  ) async {
-    String article = "a";
-    if (type.isNotEmpty) {
-      String firstLetter = type.trim().substring(0, 1).toLowerCase();
-      if ("aeiou".contains(firstLetter)) article = "an";
+    // 1. Start directly with the idiom
+    String speechText = "$idiom. ";
+
+    // 2. Meaning starts with "It means"
+    if (desc.isNotEmpty) {
+      speechText += "It means $desc. ";
     }
-    String wordType = type.isNotEmpty ? type : "word";
-    String meaningPart = desc.isNotEmpty
-        ? "$word is $article $wordType that means $desc."
-        : "$word is $article $wordType.";
 
-    String exampleText = "";
+    // 3. Examples phrasing
     if (examples.isNotEmpty) {
-      exampleText = examples.length == 1
-          ? " The example is: ${examples.first}"
-          : " The examples are: ${examples.join(". ")}";
+      speechText += examples.length == 1
+          ? "The example is: ${examples.first}"
+          : "The examples are: ${examples.join(". ")}";
     }
-    await flutterTts.speak("$meaningPart$exampleText");
+
+    await flutterTts.speak(speechText);
   }
 
+  // --- FAVORITE TOGGLE ---
   void _toggleFav(int indexInList, Map<String, dynamic> item) async {
     int newStatus = (item['is_favorite'] == 1) ? 0 : 1;
     await dbHelper.toggleFavorite(
       item['id'],
       newStatus == 1,
-      DBHelper.tableVocab,
+      DBHelper.tableIdioms,
     );
     setState(() {
       Map<String, dynamic> updatedItem = Map.from(item);
       updatedItem['is_favorite'] = newStatus;
-      _vocabList[indexInList] = updatedItem;
+      _idiomList[indexInList] = updatedItem;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading)
+    if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_idiomList.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text("No idioms found. Please add some first.")),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Words"),
+        title: const Text("Idioms"),
         centerTitle: true,
         actions: [
+          // Navigates to the Search Page for Idioms
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const SearchPage()),
+              MaterialPageRoute(builder: (context) => const SearchPageIdiom()),
             ),
           ),
         ],
       ),
-      body: _vocabList.isEmpty
-          ? const Center(child: Text("No vocabulary found."))
-          : SafeArea(
-              child: PageView.builder(
-                itemCount: 1000000,
-                controller: _pageController,
-                onPageChanged: (index) => flutterTts.stop(),
-                itemBuilder: (context, index) {
-                  final actualIndex = index % _vocabList.length;
-                  final item = _vocabList[actualIndex];
-                  return _buildVocabCard(item, actualIndex);
-                },
-              ),
-            ),
+      body: SafeArea(
+        child: PageView.builder(
+          itemCount: 1000000, // Infinite loop count
+          controller: _pageController,
+          onPageChanged: (index) {
+            // Stop speaking when swiping to next card
+            flutterTts.stop();
+          },
+          itemBuilder: (context, index) {
+            final actualIndex = index % _idiomList.length;
+            final item = _idiomList[actualIndex];
+            return _buildIdiomCard(item, actualIndex);
+          },
+        ),
+      ),
     );
   }
 
-  Widget _buildVocabCard(Map<String, dynamic> item, int indexInList) {
+  // --- IDIOM CARD DESIGN ---
+  Widget _buildIdiomCard(Map<String, dynamic> item, int indexInList) {
     bool isFav = item['is_favorite'] == 1;
     List<String> examplesList = (item['examples'] as String? ?? "")
         .split('\n')
@@ -168,6 +183,7 @@ class _ReviewPageState extends State<ReviewPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Image Section with Star Button
               Stack(
                 children: [
                   AspectRatio(
@@ -207,6 +223,8 @@ class _ReviewPageState extends State<ReviewPage> {
                   ),
                 ],
               ),
+
+              // Content Section
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
@@ -215,25 +233,11 @@ class _ReviewPageState extends State<ReviewPage> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: "${item['word'] ?? ''} ",
-                                  style: const TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: "(${item['word_type'] ?? ''})",
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    color: Colors.blueGrey,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                              ],
+                          child: Text(
+                            item['idiom'] ?? '',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
@@ -244,8 +248,7 @@ class _ReviewPageState extends State<ReviewPage> {
                             size: 30,
                           ),
                           onPressed: () => _speak(
-                            item['word'] ?? "",
-                            item['word_type'] ?? "",
+                            item['idiom'] ?? "",
                             item['description'] ?? "",
                             examplesList,
                           ),
@@ -253,6 +256,8 @@ class _ReviewPageState extends State<ReviewPage> {
                       ],
                     ),
                     const Divider(height: 30),
+
+                    // Meaning
                     const Text(
                       "Meaning",
                       style: TextStyle(
@@ -265,7 +270,10 @@ class _ReviewPageState extends State<ReviewPage> {
                       item['description'] ?? "No description provided.",
                       style: const TextStyle(fontSize: 18, height: 1.4),
                     ),
-                    const SizedBox(height: 25), // Spacing restored
+
+                    const SizedBox(height: 25),
+
+                    // Examples
                     if (examplesList.isNotEmpty) ...[
                       const Text(
                         "Examples",
@@ -303,7 +311,7 @@ class _ReviewPageState extends State<ReviewPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20), // Bottom spacing restored
+                    const SizedBox(height: 20), // Bottom breathing room
                   ],
                 ),
               ),
