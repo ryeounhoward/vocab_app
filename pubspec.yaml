@@ -40,6 +40,9 @@ dependencies:
   file_picker: ^10.3.8
   share_plus: ^12.0.1
   external_path: ^2.0.0
+  flutter_local_notifications: ^17.0.0
+  workmanager: ^0.9.0
+  timezone: ^0.9.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

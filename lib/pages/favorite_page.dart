@@ -11,28 +11,49 @@ class FavoritesPage extends StatefulWidget {
   State<FavoritesPage> createState() => _FavoritesPageState();
 }
 
-class _FavoritesPageState extends State<FavoritesPage> {
+class _FavoritesPageState extends State<FavoritesPage>
+    with WidgetsBindingObserver {
   final dbHelper = DBHelper();
-
-  // Data lists
-  List<Map<String, dynamic>> _favoriteList = []; // Master list
-  List<Map<String, dynamic>> _filteredList = []; // List shown in UI
-
+  List<Map<String, dynamic>> _favoriteList = [];
+  List<Map<String, dynamic>> _filteredList = [];
   bool _isLoading = true;
-
-  // Search Controller
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(
+      this,
+    ); // Listen for app background/foreground
     _loadFavorites();
   }
 
-  void _loadFavorites() async {
-    setState(() => _isLoading = true);
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // Stop listening
+    _searchController.dispose();
+    super.dispose();
+  }
 
-    // 1. Fetch Vocabulary Favorites
+  // Refresh when returning from another screen
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadFavorites();
+  }
+
+  // Refresh when coming back from notification tray (App Resumed)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadFavorites();
+    }
+  }
+
+  void _loadFavorites() async {
+    // Only show spinner on first load to prevent flickering
+    if (_favoriteList.isEmpty) setState(() => _isLoading = true);
+
     final vocabData = await dbHelper.queryAll(DBHelper.tableVocab);
     final favVocab = vocabData.where((item) => item['is_favorite'] == 1).map((
       item,
@@ -40,7 +61,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
       return {...item, 'origin_table': DBHelper.tableVocab};
     }).toList();
 
-    // 2. Fetch Idiom Favorites
     final idiomData = await dbHelper.queryAll(DBHelper.tableIdioms);
     final favIdioms = idiomData.where((item) => item['is_favorite'] == 1).map((
       item,
@@ -48,15 +68,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
       return {...item, 'origin_table': DBHelper.tableIdioms};
     }).toList();
 
-    setState(() {
-      _favoriteList = [...favVocab, ...favIdioms];
-      _isLoading = false;
-      // Initialize filtered list
-      _runFilter(_searchController.text);
-    });
+    if (mounted) {
+      setState(() {
+        _favoriteList = [...favVocab, ...favIdioms];
+        _isLoading = false;
+        _runFilter(_searchController.text);
+      });
+    }
   }
 
-  // Search Logic
   void _runFilter(String enteredKeyword) {
     List<Map<String, dynamic>> results = [];
     if (enteredKeyword.isEmpty) {
@@ -64,18 +84,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
     } else {
       results = _favoriteList.where((item) {
         final bool isIdiom = item['origin_table'] == DBHelper.tableIdioms;
-        // Check 'idiom' field for idioms, and 'word' field for vocabulary
         final String textToSearch = isIdiom
             ? (item['idiom'] ?? "").toString().toLowerCase()
             : (item['word'] ?? "").toString().toLowerCase();
-
         return textToSearch.contains(enteredKeyword.toLowerCase());
       }).toList();
     }
-
-    setState(() {
-      _filteredList = results;
-    });
+    setState(() => _filteredList = results);
   }
 
   Future<void> _showRemoveModal(
@@ -86,34 +101,32 @@ class _FavoritesPageState extends State<FavoritesPage> {
   ) async {
     return showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("Remove Favorite"),
-          content: Text(
-            "Are you sure you want to remove '$displayName' from your favorites?",
+      builder: (context) => AlertDialog(
+        title: const Text("Remove Favorite"),
+        content: Text(
+          "Are you sure you want to remove '$displayName' from favorites?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCEL"),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("CANCEL"),
-            ),
-            TextButton(
-              onPressed: () async {
-                await dbHelper.toggleFavorite(id, false, table);
-                _loadFavorites();
-                if (mounted) Navigator.of(context).pop();
-              },
-              child: const Text(
-                "REMOVE",
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontWeight: FontWeight.bold,
-                ),
+          TextButton(
+            onPressed: () async {
+              await dbHelper.toggleFavorite(id, false, table);
+              _loadFavorites();
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text(
+              "REMOVE",
+              style: TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 
@@ -123,16 +136,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
       appBar: AppBar(
         title: const Text("My Favorites"),
         centerTitle: true,
-        // SEARCH BAR APPLIED HERE
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
               controller: _searchController,
-              onChanged: (value) => _runFilter(value),
+              onChanged: _runFilter,
               decoration: InputDecoration(
-                hintText: "Search",
+                hintText: "Search favorites...",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -145,7 +157,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     : null,
                 filled: true,
                 fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
                   borderSide: BorderSide.none,
@@ -168,7 +179,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 final item = _filteredList[index];
                 final bool isIdiom =
                     item['origin_table'] == DBHelper.tableIdioms;
-
                 final String displayName = isIdiom
                     ? (item['idiom'] ?? "")
                     : (item['word'] ?? "");
@@ -179,28 +189,23 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   elevation: 2,
+                  clipBehavior: Clip.antiAlias,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
                   child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                     onTap: () {
-                      if (isIdiom) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => IdiomDetailPage(item: item),
-                          ),
-                        ).then((_) => _loadFavorites());
-                      } else {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => WordDetailPage(item: item),
-                          ),
-                        ).then((_) => _loadFavorites());
-                      }
+                      Widget page = isIdiom
+                          ? IdiomDetailPage(item: item)
+                          : WordDetailPage(item: item);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => page),
+                      ).then((_) => _loadFavorites());
                     },
-                    contentPadding: const EdgeInsets.all(10),
                     leading: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child:
@@ -238,14 +243,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
                         color: Colors.orange,
                         size: 28,
                       ),
-                      onPressed: () {
-                        _showRemoveModal(
-                          context,
-                          item['id'],
-                          displayName,
-                          item['origin_table'],
-                        );
-                      },
+                      onPressed: () => _showRemoveModal(
+                        context,
+                        item['id'],
+                        displayName,
+                        item['origin_table'],
+                      ),
                     ),
                   ),
                 );

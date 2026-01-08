@@ -1,9 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/menu_screen.dart';
 import 'pages/settings_page.dart';
-import 'pages/quiz_page.dart'; // Import the new page
+import 'pages/quiz_page.dart';
+import 'package:workmanager/workmanager.dart';
+import 'services/notification_service.dart';
 
-void main() => runApp(const MyApp());
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    // Initialize notifications inside the background isolate
+    await NotificationService.init();
+    await NotificationService.showWordNotification();
+    return Future.value(true);
+  });
+}
+
+void main() async {
+  // 1. Ensure Flutter is ready
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 2. Initialize Notification Service
+  await NotificationService.init();
+
+  // 3. Initialize Workmanager for background tasks
+  Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+
+  // 4. Start the App
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -12,6 +36,8 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      // This allows the NotificationService to control navigation
+      navigatorKey: NotificationService.navigatorKey,
       theme: ThemeData(primarySwatch: Colors.indigo),
       home: const MainContainer(),
     );
@@ -28,7 +54,6 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   int _currentIndex = 0;
 
-  // FIX: Make sure there are 3 items here!
   final List<Widget> _pages = [
     const MenuPage(),
     const QuizPage(),
@@ -38,12 +63,11 @@ class _MainContainerState extends State<MainContainer> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // This is where the error happens because _pages only had 2 items
       body: _pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed, // Required for 3+ items
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.rate_review),
