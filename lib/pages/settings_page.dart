@@ -3,6 +3,7 @@ import 'package:vocab_app/pages/favorite_page.dart';
 import 'package:vocab_app/pages/manage_data_page.dart';
 import 'package:vocab_app/pages/backup_restore_page.dart';
 import 'package:vocab_app/pages/manage_idioms_page.dart';
+import 'package:vocab_app/pages/vocabulary_test_settings_page.dart';
 import 'package:vocab_app/pages/word_of_day_page.dart';
 import 'voice_selection_page.dart';
 
@@ -15,6 +16,18 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text("Settings"), centerTitle: true),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.star, color: Colors.orange),
+            title: const Text("Favorites"),
+            subtitle: const Text("View your starred words"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const FavoritesPage()),
+              );
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.edit, color: Colors.indigo),
             title: const Text("Manage Vocabulary"),
@@ -41,18 +54,7 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.star, color: Colors.orange),
-            title: const Text("Favorites"),
-            subtitle: const Text("View your starred words"),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const FavoritesPage()),
-              );
-            },
-          ),
+
           ListTile(
             leading: const Icon(
               Icons.notification_important,
@@ -68,6 +70,39 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+
+          // --- UPDATED QUIZ PREFERENCES TILE ---
+          ListTile(
+            leading: const Icon(
+              Icons.quiz, // Changed icon to quiz to make it clearer
+              color: Colors.indigo,
+            ),
+            title: const Text("Quiz Preferences"),
+            subtitle: const Text("Set your quiz preferences"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () async {
+              // 1. Wait for result from QuizSettingsPage
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const QuizSettingsPage(),
+                ),
+              );
+
+              // 2. If result is true, show SnackBar here
+              if (result == true && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Quiz Preferences Saved!"),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+
+          // -------------------------------------
           ListTile(
             leading: const Icon(Icons.record_voice_over, color: Colors.indigo),
             title: const Text("Change Voice"),

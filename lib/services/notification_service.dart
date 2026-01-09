@@ -3,9 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../database/db_helper.dart';
-import '../pages/review_page.dart';
-import '../pages/favorite_page.dart'; // Import your FavoritesPage
+import '../database/db_helper.dart'; // Ensure this path is correct
+import '../pages/review_page.dart'; // Ensure this path is correct
+import '../pages/favorite_page.dart'; // Ensure this path is correct
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
@@ -16,7 +16,6 @@ class NotificationService {
 
   @pragma('vm:entry-point')
   static void onNotificationTap(NotificationResponse response) async {
-    // Dismiss notification
     if (response.id != null) {
       await _notificationsPlugin.cancel(response.id!);
     }
@@ -26,24 +25,15 @@ class NotificationService {
     final data = jsonDecode(response.payload!);
     final dbHelper = DBHelper();
 
-    // Small delay to ensure the app context is ready after waking up
     await Future.delayed(const Duration(milliseconds: 200));
 
-    // --- ACTION: "Add to favorites" button clicked ---
     if (response.actionId == 'fav_action') {
-      // 1. Add to database
       await dbHelper.toggleFavorite(data['id'], true, data['table']);
-      debugPrint("Added to favorites and opening Favorites Page");
-
-      // 2. Open the App directly to FavoritesPage
       navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const FavoritesPage()),
         (route) => route.isFirst,
       );
-    }
-    // --- ACTION: Main body clicked OR "Open" button clicked ---
-    else {
-      // Navigate to ReviewPage to see the specific word
+    } else {
       navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (context) =>
@@ -91,25 +81,59 @@ class NotificationService {
         ?.requestNotificationsPermission();
   }
 
-  static Future<void> showWordNotification() async {
+  // --- UPDATED METHOD: Accepts count ---
+  static Future<void> showWordNotification({int count = 1}) async {
+    // Note: We don't check 'remind_active' here strictly,
+    // because Workmanager usually handles that check before calling this.
+    // However, if you call this manually, we can check.
     final prefs = await SharedPreferences.getInstance();
-    if (!(prefs.getBool('remind_active') ?? false)) return;
-    await _triggerNotification();
+    // If it's a manual call and disabled, stop.
+    // (Optional logic depending on how you want the "Test" button to behave)
+    // if (!(prefs.getBool('remind_active') ?? false)) return;
+
+    await _triggerNotification(count);
   }
 
+  // Test button helper
   static Future<void> showTestNotification() async {
-    await _triggerNotification();
+    // Default to 1 for quick test, or load from prefs
+    final prefs = await SharedPreferences.getInstance();
+    int count = prefs.getInt('remind_word_count') ?? 1;
+    await _triggerNotification(count);
   }
 
-  static Future<void> _triggerNotification() async {
+  // --- MAIN LOGIC ---
+  static Future<void> _triggerNotification(int count) async {
     final dbHelper = DBHelper();
-    final List<Map<String, dynamic>> words = await dbHelper.queryAll(
+
+    // 1. Get ALL words (or optimize this to get random limit in SQL)
+    final List<Map<String, dynamic>> allWords = await dbHelper.queryAll(
       DBHelper.tableVocab,
     );
-    if (words.isEmpty) return;
 
-    final wordItem = words[Random().nextInt(words.length)];
+    if (allWords.isEmpty) return;
 
+    // 2. Shuffle locally to get random words
+    List<Map<String, dynamic>> shuffledWords = List.from(allWords)..shuffle();
+
+    // 3. Take exactly 'count' words (e.g., 2 or 3)
+    // Use .take() to avoid errors if count > total words
+    final wordsToShow = shuffledWords.take(count).toList();
+
+    // 4. Loop and send notification for EACH word
+    for (int i = 0; i < wordsToShow.length; i++) {
+      final wordItem = wordsToShow[i];
+      await _sendSingleNotification(wordItem, i); // Pass index for unique ID
+
+      // Optional: Tiny delay so they arrive in order
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
+  static Future<void> _sendSingleNotification(
+    Map<String, dynamic> wordItem,
+    int index,
+  ) async {
     String wordTitle =
         "${wordItem['word']} (${wordItem['word_type'] ?? 'word'})";
     String description = wordItem['description'] ?? "No meaning provided.";
@@ -140,6 +164,8 @@ class NotificationService {
             contentTitle: wordTitle,
           ),
           playSound: true,
+          // GROUP KEY ensures they stack nicely
+          groupKey: 'com.vocab.daily_words',
           actions: <AndroidNotificationAction>[
             const AndroidNotificationAction(
               'open_action',
@@ -150,16 +176,17 @@ class NotificationService {
             const AndroidNotificationAction(
               'fav_action',
               'Add to favorites',
-              // 1. CHANGED THIS TO TRUE
-              // This is required to open the app and show the FavoritesPage
               showsUserInterface: true,
               cancelNotification: true,
             ),
           ],
         );
 
+    // generate a semi-random ID, but add index to ensure uniqueness in this batch
+    int notificationId = Random().nextInt(10000) + index;
+
     await _notificationsPlugin.show(
-      Random().nextInt(100000),
+      notificationId,
       wordTitle,
       description,
       NotificationDetails(android: androidDetails),

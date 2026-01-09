@@ -13,13 +13,14 @@ class WordOfDayPage extends StatefulWidget {
 class _WordOfDayPageState extends State<WordOfDayPage> {
   bool _isActive = false;
   bool _isRandom = true;
-  int _intervalHours = 2;
+  bool _isExactHour = false; // <--- NEW SWITCH VARIABLE
+  int _intervalHours = 1;
+  int _wordCount = 1;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
-    // 1. REQUEST PERMISSION ON OPEN
     NotificationService.requestPermissions();
   }
 
@@ -28,7 +29,9 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
     setState(() {
       _isActive = prefs.getBool('remind_active') ?? false;
       _isRandom = prefs.getBool('remind_random') ?? true;
-      _intervalHours = prefs.getInt('remind_interval') ?? 2;
+      _isExactHour = prefs.getBool('remind_exact') ?? false; // Load setting
+      _intervalHours = prefs.getInt('remind_interval') ?? 1;
+      _wordCount = prefs.getInt('remind_word_count') ?? 1;
     });
   }
 
@@ -36,31 +39,66 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('remind_active', _isActive);
     await prefs.setBool('remind_random', _isRandom);
+    await prefs.setBool('remind_exact', _isExactHour); // Save setting
     await prefs.setInt('remind_interval', _intervalHours);
+    await prefs.setInt('remind_word_count', _wordCount);
 
     if (_isActive) {
+      // --- LOGIC FOR TOP OF THE HOUR ---
+      Duration initialDelay = Duration.zero;
+
+      if (_isExactHour) {
+        final now = DateTime.now();
+        // Calculate the next top of the hour (e.g., if 10:20, target is 11:00)
+        final nextHour = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          now.hour + 1,
+          0,
+          0,
+        );
+
+        // Calculate difference
+        initialDelay = nextHour.difference(now);
+
+        // Safety check: ensure delay is positive
+        if (initialDelay.isNegative) {
+          initialDelay = Duration.zero;
+        }
+      }
+      // ---------------------------------
+
       Workmanager().registerPeriodicTask(
         "word_reminder_task",
         "word_reminder_periodic",
         frequency: Duration(hours: _intervalHours),
+        // This ensures the first run happens at the top of the next hour
+        initialDelay: initialDelay,
         existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
+        inputData: <String, dynamic>{
+          'wordCount': _wordCount,
+          'isRandom': _isRandom,
+        },
       );
     } else {
       Workmanager().cancelByUniqueName("word_reminder_task");
     }
 
     if (mounted) {
+      String message = "Settings Saved!";
+      if (_isActive && _isExactHour) {
+        message += " First alert at next hour.";
+      }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Settings Saved!")));
+      ).showSnackBar(SnackBar(content: Text(message)));
       Navigator.pop(context);
     }
   }
 
   void _testNotification() async {
-    // 2. CALL THE NEW TEST FUNCTION
-    await NotificationService.showTestNotification();
-
+    await NotificationService.showWordNotification(count: _wordCount);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Sending test notification...")),
@@ -75,6 +113,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 1. ENABLE SWITCH
           ListTile(
             title: const Text("Enable Reminders"),
             subtitle: const Text("Get notifications for vocabulary"),
@@ -85,6 +124,20 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
             ),
           ),
           const Divider(),
+
+          // 2. TIMELY SWITCH (NEW)
+          ListTile(
+            title: const Text("Align to Exact Hour"),
+            subtitle: const Text("Notify at every top of the hour"),
+            trailing: Switch(
+              value: _isExactHour,
+              activeThumbColor: Colors.indigo,
+              onChanged: (val) => setState(() => _isExactHour = val),
+            ),
+          ),
+          const Divider(),
+
+          // 3. ORDER MODE
           ListTile(
             title: const Text("Order Mode"),
             subtitle: Text(
@@ -96,6 +149,29 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
               onChanged: (val) => setState(() => _isRandom = val),
             ),
           ),
+
+          // 4. WORD COUNT
+          const Divider(),
+          const ListTile(
+            title: Text("Words per Notification"),
+            contentPadding: EdgeInsets.symmetric(horizontal: 16),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: DropdownButton<int>(
+              isExpanded: true,
+              value: _wordCount,
+              items: List.generate(5, (index) => index + 1).map((int value) {
+                return DropdownMenuItem<int>(
+                  value: value,
+                  child: Text("$value ${value == 1 ? "Word" : "Words"}"),
+                );
+              }).toList(),
+              onChanged: (val) => setState(() => _wordCount = val!),
+            ),
+          ),
+
+          // 5. INTERVAL
           const Divider(),
           const ListTile(
             title: Text("Remind me every:"),
@@ -115,6 +191,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
               onChanged: (val) => setState(() => _intervalHours = val!),
             ),
           ),
+
           const SizedBox(height: 40),
           SizedBox(
             height: 55,
@@ -133,7 +210,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
               ),
             ),
           ),
-          // const SizedBox(height: 15),
+          const SizedBox(height: 15),
           // SizedBox(
           //   height: 55,
           //   child: OutlinedButton(

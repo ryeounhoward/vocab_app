@@ -1,30 +1,37 @@
 import 'package:flutter/material.dart';
-import 'package:vocab_app/pages/menu_screen.dart';
-import 'pages/settings_page.dart';
-import 'pages/quiz_page.dart';
+import 'package:vocab_app/pages/vocabulary_test_page.dart';
 import 'package:workmanager/workmanager.dart';
 import 'services/notification_service.dart';
+// Import your pages for the main app
+import 'pages/menu_screen.dart'; // Change to your actual file path
+import 'pages/settings_page.dart'; // Change to your actual file path
+import 'pages/quiz_page.dart'; // Change to your actual file path
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    // 1. Get Count
+    int count = inputData?['wordCount'] ?? 1;
+
+    // 2. Init Service
     await NotificationService.init();
-    await NotificationService.showWordNotification();
+
+    // 3. Show Notifications
+    await NotificationService.showWordNotification(count: count);
+
     return Future.value(true);
   });
 }
 
 void main() async {
-  // 1. Ensure Flutter is ready
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Initialize Notification Service
+  // Initialize Notification Service
   await NotificationService.init();
 
-  // 3. Initialize Workmanager for background tasks
+  // Initialize Workmanager
   Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
 
-  // 4. Start the App
   runApp(const MyApp());
 }
 
@@ -35,8 +42,8 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      // This allows the NotificationService to control navigation
-      navigatorKey: NotificationService.navigatorKey,
+      navigatorKey: NotificationService
+          .navigatorKey, // Important for clicking notifications
       theme: ThemeData(primarySwatch: Colors.indigo),
       home: const MainContainer(),
       title: 'Vocabulary',
@@ -54,26 +61,43 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   int _currentIndex = 0;
 
+  // 1. ORDER FIXED: Matches the BottomNavigationBar below
   final List<Widget> _pages = [
-    const MenuPage(),
-    const QuizPage(),
-    const SettingsPage(),
+    const MenuPage(), // Index 0: Review
+    const QuizPage(), // Index 1: Practice (Flashcards?)
+    const VocabularyTestPage(), // Index 2: The New Test
+    const SettingsPage(), // Index 3: Settings
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // The body updates based on _currentIndex
       body: _pages[_currentIndex],
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
+        selectedItemColor: Colors.indigo, // Highlight color
+        unselectedItemColor: Colors.grey,
         items: const [
+          // Index 0
           BottomNavigationBarItem(
             icon: Icon(Icons.rate_review),
             label: 'Review',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Practice'),
+          // Index 1
+          BottomNavigationBarItem(
+            icon: Icon(Icons.style), // Changed icon to distinguish from Quiz
+            label: 'Practice',
+          ),
+          // Index 2 (The New Quiz)
+          BottomNavigationBarItem(
+            icon: Icon(Icons.quiz), // Used the Quiz icon here
+            label: 'Quiz',
+          ),
+          // Index 3
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
             label: 'Settings',
