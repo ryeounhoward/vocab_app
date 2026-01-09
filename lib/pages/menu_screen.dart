@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/idiom_review_page.dart';
-import 'review_page.dart';
+import 'package:vocab_app/pages/review_page.dart';
+import 'package:vocab_app/pages/conversation_page.dart';
 
 class MenuPage extends StatelessWidget {
   const MenuPage({super.key});
@@ -10,38 +10,73 @@ class MenuPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: MenuCard(
-                title: "Words",
-                imagePath: "assets/images/vocabulary.jpg",
-                color: Colors.blueAccent,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const ReviewPage()),
-                  );
-                },
-              ),
-            ),
+        // LayoutBuilder gives us the exact height of the safe area
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // We calculate the height so that exactly 2 cards fit in the view.
+            // (Total Height / 2). The 3rd card will be off-screen until scrolled.
+            final double cardHeight = constraints.maxHeight / 2;
 
-            Expanded(
-              child: MenuCard(
-                title: "Idioms",
-                imagePath: "assets/images/idioms.jpg",
-                color: Colors.orangeAccent,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const IdiomReviewPage(),
+            return SingleChildScrollView(
+              child: Column(
+                children: [
+                  // 1. WORDS CARD
+                  SizedBox(
+                    height: cardHeight,
+                    child: MenuCard(
+                      title: "Words",
+                      imagePath: "assets/images/vocabulary.jpg",
+                      color: Colors.blueAccent,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ReviewPage(),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+
+                  // 2. IDIOMS CARD
+                  SizedBox(
+                    height: cardHeight,
+                    child: MenuCard(
+                      title: "Idioms",
+                      imagePath: "assets/images/idioms.jpg",
+                      color: Colors.orangeAccent,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const IdiomReviewPage(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  // 3. CONVERSATION CARD
+                  SizedBox(
+                    height: cardHeight,
+                    child: MenuCard(
+                      title: "Conversation",
+                      imagePath: "assets/images/conversation.jpg",
+                      color: Colors.greenAccent,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ConversationPage(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -86,7 +121,6 @@ class MenuCard extends StatelessWidget {
               // Background Image
               Image.asset(imagePath, fit: BoxFit.cover),
               // Overlay for readability
-              // ignore: deprecated_member_use
               Container(color: Colors.black.withOpacity(0.4)),
               // Title Text
               Center(

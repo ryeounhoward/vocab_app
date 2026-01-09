@@ -22,6 +22,9 @@ class _ReviewPageState extends State<ReviewPage> {
   bool _isLoading = true;
   PageController? _pageController;
 
+  // FIX 1: Add a variable to store the preferred voice in memory
+  Map<String, String>? _currentVoice;
+
   @override
   void initState() {
     super.initState();
@@ -33,11 +36,15 @@ class _ReviewPageState extends State<ReviewPage> {
     final prefs = await SharedPreferences.getInstance();
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
+
+    // FIX 2: Store the voice in the variable and set it initially
     if (voiceName != null && voiceLocale != null) {
-      await flutterTts.setVoice({"name": voiceName, "locale": voiceLocale});
+      _currentVoice = {"name": voiceName, "locale": voiceLocale};
+      await flutterTts.setVoice(_currentVoice!);
     } else {
       await flutterTts.setLanguage("en-US");
     }
+
     await flutterTts.setPitch(1.0);
     await flutterTts.setSpeechRate(0.5);
   }
@@ -98,6 +105,13 @@ class _ReviewPageState extends State<ReviewPage> {
           ? " The example is: ${examples.first}"
           : " The examples are: ${examples.join(". ")}";
     }
+
+    // FIX 3: Force set the voice again right before speaking
+    // This prevents the OS from resetting to the default voice after inactivity
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
+    }
+
     await flutterTts.speak("$meaningPart$exampleText");
   }
 
@@ -117,8 +131,9 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading)
+    if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(

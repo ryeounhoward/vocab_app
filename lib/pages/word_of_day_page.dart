@@ -80,7 +80,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
             subtitle: const Text("Get notifications for vocabulary"),
             trailing: Switch(
               value: _isActive,
-              activeColor: Colors.indigo,
+              activeThumbColor: Colors.indigo,
               onChanged: (val) => setState(() => _isActive = val),
             ),
           ),
@@ -92,7 +92,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
             ),
             trailing: Switch(
               value: _isRandom,
-              activeColor: Colors.indigo,
+              activeThumbColor: Colors.indigo,
               onChanged: (val) => setState(() => _isRandom = val),
             ),
           ),
@@ -133,24 +133,24 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
               ),
             ),
           ),
-          // const SizedBox(height: 15),
-          // SizedBox(
-          //   height: 55,
-          //   child: OutlinedButton(
-          //     style: OutlinedButton.styleFrom(
-          //       side: const BorderSide(color: Colors.indigo),
-          //       foregroundColor: Colors.indigo,
-          //       shape: RoundedRectangleBorder(
-          //         borderRadius: BorderRadius.circular(8),
-          //       ),
-          //     ),
-          //     onPressed: _testNotification,
-          //     child: const Text(
-          //       "TEST NOTIFICATION NOW",
-          //       style: TextStyle(fontWeight: FontWeight.bold),
-          //     ),
-          //   ),
-          // ),
+          const SizedBox(height: 15),
+          SizedBox(
+            height: 55,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.indigo),
+                foregroundColor: Colors.indigo,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: _testNotification,
+              child: const Text(
+                "TEST NOTIFICATION NOW",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
         ],
       ),
     );

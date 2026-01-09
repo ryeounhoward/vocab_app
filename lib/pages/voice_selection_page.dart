@@ -75,6 +75,7 @@ class _VoiceSelectionPageState extends State<VoiceSelectionPage> {
 
     _previewVoice(voice);
 
+    // ignore: use_build_context_synchronously
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text("Voice set to ${voice['name']}"),

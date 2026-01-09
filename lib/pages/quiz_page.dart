@@ -16,11 +16,11 @@ class _QuizPageState extends State<QuizPage> {
   List<Map<String, dynamic>> _vocabList = [];
   bool _isLoading = true;
   int? _flippedIndex; // This will track the absolute PageView index
-  
+
   // 1. Define a PageController
   PageController? _pageController;
   // A large number to simulate infinity
-  final int _loopSeparator = 10000; 
+  final int _loopSeparator = 10000;
 
   @override
   void initState() {
@@ -55,10 +55,10 @@ class _QuizPageState extends State<QuizPage> {
     final data = await dbHelper.queryAll();
     List<Map<String, dynamic>> shuffledList = List.from(data);
     shuffledList.shuffle(); // 2. Shuffle the list
-    
+
     setState(() {
       _vocabList = shuffledList;
-      
+
       // 3. Initialize controller at a high multiple of the list length
       // This allows swiping left immediately.
       if (_vocabList.isNotEmpty) {
@@ -204,6 +204,7 @@ class _QuizPageState extends State<QuizPage> {
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
+            // ignore: deprecated_member_use
             color: Colors.black.withOpacity(0.1),
             blurRadius: 15,
             offset: const Offset(0, 8),
@@ -216,6 +217,7 @@ class _QuizPageState extends State<QuizPage> {
             top: 10,
             right: 10,
             child: IconButton(
+              // ignore: deprecated_member_use
               icon: Icon(Icons.volume_up, color: textColor.withOpacity(0.6)),
               onPressed: () => _speak(content),
             ),

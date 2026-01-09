@@ -115,6 +115,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             onPressed: () async {
               await dbHelper.toggleFavorite(id, false, table);
               _loadFavorites();
+              // ignore: use_build_context_synchronously
               if (mounted) Navigator.pop(context);
             },
             child: const Text(
@@ -144,7 +145,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               controller: _searchController,
               onChanged: _runFilter,
               decoration: InputDecoration(
-                hintText: "Search favorites...",
+                hintText: "Search",
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
@@ -173,9 +174,15 @@ class _FavoritesPageState extends State<FavoritesPage>
           : _filteredList.isEmpty
           ? const Center(child: Text("No matches found."))
           : ListView.builder(
-              itemCount: _filteredList.length,
+              // Add +1 to the count to make room for the SizedBox
+              itemCount: _filteredList.length + 1,
               padding: const EdgeInsets.all(12),
               itemBuilder: (context, index) {
+                // Check if this is the extra item at the end
+                if (index == _filteredList.length) {
+                  return const SizedBox(height: 40);
+                }
+
                 final item = _filteredList[index];
                 final bool isIdiom =
                     item['origin_table'] == DBHelper.tableIdioms;

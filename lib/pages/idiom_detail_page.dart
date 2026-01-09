@@ -17,6 +17,9 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
   final FlutterTts flutterTts = FlutterTts();
   late Map<String, dynamic> currentItem;
 
+  // FIX 1: Add a variable to store the preferred voice
+  Map<String, String>? _currentVoice;
+
   @override
   void initState() {
     super.initState();
@@ -29,11 +32,14 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
 
+    // FIX 2: Store the voice in the variable and set it initially
     if (voiceName != null && voiceLocale != null) {
-      await flutterTts.setVoice({"name": voiceName, "locale": voiceLocale});
+      _currentVoice = {"name": voiceName, "locale": voiceLocale};
+      await flutterTts.setVoice(_currentVoice!);
     } else {
       await flutterTts.setLanguage("en-US");
     }
+
     await flutterTts.setPitch(1.0);
     await flutterTts.setSpeechRate(0.5);
   }
@@ -58,6 +64,12 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
       speechText += examples.length == 1
           ? "The example is: ${examples.first}"
           : "The examples are: ${examples.join(". ")}";
+    }
+
+    // FIX 3: Force set the voice again right before speaking
+    // This ensures the voice is correct even if the app was in background
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
     }
 
     await flutterTts.speak(speechText);
@@ -118,8 +130,7 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
                               : Container(
                                   color: Colors.grey[200],
                                   child: const Icon(
-                                    Icons
-                                        .image, // Changed icon to represent idioms
+                                    Icons.image,
                                     size: 80,
                                     color: Colors.grey,
                                   ),

@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
-import 'search_page_idiom.dart'; // Ensure this path is correct
+import 'search_page_idiom.dart';
 
 class IdiomReviewPage extends StatefulWidget {
-  final int? selectedId; // Used when navigating from Search results
+  final int? selectedId;
 
   const IdiomReviewPage({super.key, this.selectedId});
 
@@ -21,6 +21,9 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
   bool _isLoading = true;
   PageController? _pageController;
 
+  // FIX 1: Add a variable to store the preferred voice
+  Map<String, String>? _currentVoice;
+
   @override
   void initState() {
     super.initState();
@@ -34,11 +37,14 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
 
+    // FIX 2: Store the voice in the variable and set it initially
     if (voiceName != null && voiceLocale != null) {
-      await flutterTts.setVoice({"name": voiceName, "locale": voiceLocale});
+      _currentVoice = {"name": voiceName, "locale": voiceLocale};
+      await flutterTts.setVoice(_currentVoice!);
     } else {
       await flutterTts.setLanguage("en-US");
     }
+
     await flutterTts.setPitch(1.0);
     await flutterTts.setSpeechRate(0.5);
   }
@@ -54,14 +60,12 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
   void _loadData() async {
     setState(() => _isLoading = true);
 
-    // Query idioms table specifically
     final data = await dbHelper.queryAll(DBHelper.tableIdioms);
     List<Map<String, dynamic>> shuffledData = List.from(data);
-    shuffledData.shuffle(); // Shuffle the entire database for review
+    shuffledData.shuffle();
 
     int targetIndex = 0;
 
-    // If we came from search, find where that specific idiom is in our shuffled list
     if (widget.selectedId != null) {
       targetIndex = shuffledData.indexWhere(
         (item) => item['id'] == widget.selectedId,
@@ -73,7 +77,6 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       _idiomList = shuffledData;
       _isLoading = false;
       if (_idiomList.isNotEmpty) {
-        // infinite loop start point + the target index from search
         int initialPage = (_idiomList.length * 100) + targetIndex;
         _pageController = PageController(
           viewportFraction: 0.93,
@@ -100,6 +103,12 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       speechText += examples.length == 1
           ? "The example is: ${examples.first}"
           : "The examples are: ${examples.join(". ")}";
+    }
+
+    // FIX 3: Force set the voice again right before speaking
+    // This ensures the voice is correct even if the app was in background
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
     }
 
     await flutterTts.speak(speechText);
@@ -137,7 +146,6 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
         title: const Text("Idioms"),
         centerTitle: true,
         actions: [
-          // Navigates to the Search Page for Idioms
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () => Navigator.push(
@@ -149,10 +157,9 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       ),
       body: SafeArea(
         child: PageView.builder(
-          itemCount: 1000000, // Infinite loop count
+          itemCount: 1000000,
           controller: _pageController,
           onPageChanged: (index) {
-            // Stop speaking when swiping to next card
             flutterTts.stop();
           },
           itemBuilder: (context, index) {
@@ -183,7 +190,7 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image Section with Star Button
+              // Image Section
               Stack(
                 children: [
                   AspectRatio(
@@ -311,7 +318,7 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20), // Bottom breathing room
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),

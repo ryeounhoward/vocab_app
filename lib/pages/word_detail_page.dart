@@ -17,6 +17,9 @@ class _WordDetailPageState extends State<WordDetailPage> {
   final FlutterTts flutterTts = FlutterTts();
   late Map<String, dynamic> currentItem;
 
+  // FIX 1: Add a variable to store the preferred voice
+  Map<String, String>? _currentVoice;
+
   @override
   void initState() {
     super.initState();
@@ -29,8 +32,10 @@ class _WordDetailPageState extends State<WordDetailPage> {
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
 
+    // FIX 2: Store the voice in the variable and set it initially
     if (voiceName != null && voiceLocale != null) {
-      await flutterTts.setVoice({"name": voiceName, "locale": voiceLocale});
+      _currentVoice = {"name": voiceName, "locale": voiceLocale};
+      await flutterTts.setVoice(_currentVoice!);
     } else {
       await flutterTts.setLanguage("en-US");
     }
@@ -68,12 +73,24 @@ class _WordDetailPageState extends State<WordDetailPage> {
           : " The examples are: ${examples.join(". ")}";
     }
 
+    // FIX 3: Force set the voice again right before speaking
+    // This ensures the voice is correct even if the app was in background
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
+    }
+
     await flutterTts.speak("$meaningPart$exampleText");
   }
 
   void _toggleFav() async {
     int newStatus = (currentItem['is_favorite'] == 1) ? 0 : 1;
-    await dbHelper.toggleFavorite(currentItem['id'], newStatus == 1);
+
+    // Updated to include table name for consistency with your other pages
+    await dbHelper.toggleFavorite(
+      currentItem['id'],
+      newStatus == 1,
+      DBHelper.tableVocab,
+    );
 
     setState(() {
       currentItem = {...currentItem, 'is_favorite': newStatus};
@@ -112,7 +129,8 @@ class _WordDetailPageState extends State<WordDetailPage> {
                       children: [
                         AspectRatio(
                           aspectRatio: 1,
-                          child: currentItem['image_path'] != null &&
+                          child:
+                              currentItem['image_path'] != null &&
                                   currentItem['image_path'] != ""
                               ? Image.file(
                                   File(currentItem['image_path']),
@@ -166,7 +184,8 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                         ),
                                       ),
                                       TextSpan(
-                                        text: "(${currentItem['word_type'] ?? ''})",
+                                        text:
+                                            "(${currentItem['word_type'] ?? ''})",
                                         style: const TextStyle(
                                           fontSize: 18,
                                           color: Colors.blueGrey,

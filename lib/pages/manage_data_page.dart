@@ -79,6 +79,7 @@ class _ManageDataPageState extends State<ManageDataPage> {
               onPressed: () async {
                 await dbHelper.delete(id);
                 _refreshData();
+                // ignore: use_build_context_synchronously
                 if (mounted) Navigator.of(context).pop();
               },
               child: const Text("DELETE", style: TextStyle(color: Colors.red)),

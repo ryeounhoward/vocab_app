@@ -8,7 +8,6 @@ import 'services/notification_service.dart';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    // Initialize notifications inside the background isolate
     await NotificationService.init();
     await NotificationService.showWordNotification();
     return Future.value(true);

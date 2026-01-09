@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import '../pages/review_page.dart';
+import '../pages/favorite_page.dart'; // Import your FavoritesPage
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
@@ -13,37 +14,42 @@ class NotificationService {
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
-  // This handles what happens when a user interact with the notification
   @pragma('vm:entry-point')
   static void onNotificationTap(NotificationResponse response) async {
-    // 1. Immediately dismiss the notification from the tray
+    // Dismiss notification
     if (response.id != null) {
       await _notificationsPlugin.cancel(response.id!);
     }
 
     if (response.payload == null) return;
+
     final data = jsonDecode(response.payload!);
     final dbHelper = DBHelper();
 
-    // ACTION: "Add to favorites" button clicked
-    if (response.actionId == 'fav_action') {
-      // JUST add to database favorites silently.
-      // Do NOT open the app (handled by showsUserInterface: false in trigger)
-      await dbHelper.toggleFavorite(data['id'], true, data['table']);
-      debugPrint("Silent add to favorites: ${data['id']}");
-    }
-    // ACTION: Main body clicked OR "Open" button clicked
-    else {
-      // 1. Add to favorites automatically because the user wanted to see it
-      await dbHelper.toggleFavorite(data['id'], true, data['table']);
+    // Small delay to ensure the app context is ready after waking up
+    await Future.delayed(const Duration(milliseconds: 200));
 
-      // 2. Navigate the app to the specific card
+    // --- ACTION: "Add to favorites" button clicked ---
+    if (response.actionId == 'fav_action') {
+      // 1. Add to database
+      await dbHelper.toggleFavorite(data['id'], true, data['table']);
+      debugPrint("Added to favorites and opening Favorites Page");
+
+      // 2. Open the App directly to FavoritesPage
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const FavoritesPage()),
+        (route) => route.isFirst,
+      );
+    }
+    // --- ACTION: Main body clicked OR "Open" button clicked ---
+    else {
+      // Navigate to ReviewPage to see the specific word
       navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (context) =>
               ReviewPage(selectedId: data['id'], originTable: data['table']),
         ),
-        (route) => route.isFirst, // Clear the stack to prevent navigation loops
+        (route) => route.isFirst,
       );
     }
   }
@@ -58,10 +64,8 @@ class NotificationService {
 
     await _notificationsPlugin.initialize(
       settings,
-      onDidReceiveNotificationResponse:
-          onNotificationTap, // For foreground clicks
-      onDidReceiveBackgroundNotificationResponse:
-          onNotificationTap, // For clicks when app is closed
+      onDidReceiveNotificationResponse: onNotificationTap,
+      onDidReceiveBackgroundNotificationResponse: onNotificationTap,
     );
 
     await _notificationsPlugin
@@ -117,7 +121,7 @@ class NotificationService {
         .toList();
     if (examplesList.isNotEmpty) {
       exampleText =
-          "\n\nExample: ${examplesList[Random().nextInt(examplesList.length)]}";
+          "\nExample: ${examplesList[Random().nextInt(examplesList.length)]}";
     }
 
     String payload = jsonEncode({
@@ -140,13 +144,15 @@ class NotificationService {
             const AndroidNotificationAction(
               'open_action',
               'Open',
-              showsUserInterface: true, // This button OPENS the app
+              showsUserInterface: true,
               cancelNotification: true,
             ),
             const AndroidNotificationAction(
               'fav_action',
               'Add to favorites',
-              showsUserInterface: false, // This button stays in BACKGROUND
+              // 1. CHANGED THIS TO TRUE
+              // This is required to open the app and show the FavoritesPage
+              showsUserInterface: true,
               cancelNotification: true,
             ),
           ],
