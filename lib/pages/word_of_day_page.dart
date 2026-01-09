@@ -133,24 +133,24 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
               ),
             ),
           ),
-          const SizedBox(height: 15),
-          SizedBox(
-            height: 55,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.indigo),
-                foregroundColor: Colors.indigo,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onPressed: _testNotification,
-              child: const Text(
-                "TEST NOTIFICATION NOW",
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
+          // const SizedBox(height: 15),
+          // SizedBox(
+          //   height: 55,
+          //   child: OutlinedButton(
+          //     style: OutlinedButton.styleFrom(
+          //       side: const BorderSide(color: Colors.indigo),
+          //       foregroundColor: Colors.indigo,
+          //       shape: RoundedRectangleBorder(
+          //         borderRadius: BorderRadius.circular(8),
+          //       ),
+          //     ),
+          //     onPressed: _testNotification,
+          //     child: const Text(
+          //       "TEST NOTIFICATION NOW",
+          //       style: TextStyle(fontWeight: FontWeight.bold),
+          //     ),
+          //   ),
+          // ),
         ],
       ),
     );

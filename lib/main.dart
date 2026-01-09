@@ -39,6 +39,7 @@ class MyApp extends StatelessWidget {
       navigatorKey: NotificationService.navigatorKey,
       theme: ThemeData(primarySwatch: Colors.indigo),
       home: const MainContainer(),
+      title: 'Vocabulary',
     );
   }
 }
