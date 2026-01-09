@@ -60,41 +60,55 @@ class _AddEditPageState extends State<AddEditPage> {
   }
 
   // --- NEW: Function to download image from URL ---
-  Future<String?> _downloadImage(String url) async {
-    try {
-      setState(() => _isDownloading = true);
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        // Get directory to save the image
-        final documentDirectory = await getApplicationDocumentsDirectory();
-        // Create a unique filename
-        String fileName =
-            "downloaded_${DateTime.now().millisecondsSinceEpoch}.png";
-        File file = File(path.join(documentDirectory.path, fileName));
-        // Write the bytes to a local file
-        await file.writeAsBytes(response.bodyBytes);
-        return file.path;
-      }
-    } catch (e) {
-      debugPrint("Download error: $e");
-    } finally {
-      setState(() => _isDownloading = false);
-    }
-    return null;
-  }
+Future<String?> _downloadImage(String url) async {
+  try {
+    setState(() => _isDownloading = true);
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      // 1. Get path and ensure "images" folder exists
+      final documentDirectory = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory(path.join(documentDirectory.path, "images"));
+      if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
 
-  Future<void> _pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile != null) {
-      setState(() {
-        _imagePath = pickedFile.path;
-        _urlController.clear(); // Clear URL if gallery is used
-      });
+      // 2. Create unique filename
+      String fileName = "vocab_${DateTime.now().millisecondsSinceEpoch}.png";
+      File file = File(path.join(imagesDir.path, fileName));
+      
+      // 3. Write bytes
+      await file.writeAsBytes(response.bodyBytes);
+      return file.path; // Returns the permanent path
     }
+  } catch (e) {
+    debugPrint("Download error: $e");
+  } finally {
+    setState(() => _isDownloading = false);
   }
+  return null;
+}
 
+Future<void> _pickImage() async {
+  final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+  
+  if (pickedFile != null) {
+    // 1. Get path and ensure "images" folder exists
+    final documentDirectory = await getApplicationDocumentsDirectory();
+    final imagesDir = Directory(path.join(documentDirectory.path, "images"));
+    if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
+
+    // 2. Create a permanent filename and path
+    String fileName = "gallery_${DateTime.now().millisecondsSinceEpoch}${path.extension(pickedFile.path)}";
+    String permanentPath = path.join(imagesDir.path, fileName);
+
+    // 3. COPY the file from cache to permanent storage
+    File tempFile = File(pickedFile.path);
+    await tempFile.copy(permanentPath);
+
+    setState(() {
+      _imagePath = permanentPath; // Save this path
+      _urlController.clear();
+    });
+  }
+}
   void _save() async {
     if (_formKey.currentState!.validate()) {
       // Logic: If URL is provided and no gallery image was picked, download it first

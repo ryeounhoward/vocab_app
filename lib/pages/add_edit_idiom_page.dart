@@ -45,37 +45,46 @@ class _AddEditIdiomPageState extends State<AddEditIdiomPage> {
     }
   }
 
-  Future<String?> _downloadImage(String url) async {
-    try {
-      setState(() => _isDownloading = true);
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final documentDirectory = await getApplicationDocumentsDirectory();
-        String fileName = "idiom_${DateTime.now().millisecondsSinceEpoch}.png";
-        File file = File(path.join(documentDirectory.path, fileName));
-        await file.writeAsBytes(response.bodyBytes);
-        return file.path;
-      }
-    } catch (e) {
-      debugPrint("Download error: $e");
-    } finally {
-      setState(() => _isDownloading = false);
-    }
-    return null;
-  }
+Future<String?> _downloadImage(String url) async {
+  try {
+    setState(() => _isDownloading = true);
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final documentDirectory = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory(path.join(documentDirectory.path, "images"));
+      if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
 
-  Future<void> _pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile != null) {
-      setState(() {
-        _imagePath = pickedFile.path;
-        _urlController.clear();
-      });
+      String fileName = "idiom_${DateTime.now().millisecondsSinceEpoch}.png";
+      File file = File(path.join(imagesDir.path, fileName));
+      await file.writeAsBytes(response.bodyBytes);
+      return file.path;
     }
+  } catch (e) {
+    debugPrint("Download error: $e");
+  } finally {
+    setState(() => _isDownloading = false);
   }
+  return null;
+}
 
+Future<void> _pickImage() async {
+  final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+  if (pickedFile != null) {
+    final documentDirectory = await getApplicationDocumentsDirectory();
+    final imagesDir = Directory(path.join(documentDirectory.path, "images"));
+    if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
+
+    String fileName = "idiom_gal_${DateTime.now().millisecondsSinceEpoch}${path.extension(pickedFile.path)}";
+    String permanentPath = path.join(imagesDir.path, fileName);
+
+    await File(pickedFile.path).copy(permanentPath);
+
+    setState(() {
+      _imagePath = permanentPath;
+      _urlController.clear();
+    });
+  }
+}
   void _save() async {
     if (_formKey.currentState!.validate()) {
       if (_urlController.text.isNotEmpty &&
