@@ -95,11 +95,24 @@ class SettingsPage extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text("Quiz Preferences Saved!"),
-                    backgroundColor: Colors.green,
                     duration: Duration(seconds: 2),
                   ),
                 );
               }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.style, color: Colors.indigo),
+            title: const Text("Practice Preferences"),
+            subtitle: const Text("Set your practice session preferences"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PracticePreferencesPage(),
+                ),
+              );
             },
           ),
 
@@ -118,20 +131,7 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.style, color: Colors.indigo),
-            title: const Text("Practice Preferences"),
-            subtitle: const Text("Set your practice session preferences"),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const PracticePreferencesPage(),
-                ),
-              );
-            },
-          ),
+
           ListTile(
             leading: const Icon(Icons.backup, color: Colors.teal),
             title: const Text("Backup & Restore"),

@@ -217,7 +217,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
             ),
           ),
 
-          const SizedBox(height: 40),
+          const SizedBox(height: 20),
           Padding(
             padding: EdgeInsets.zero,
             child: SizedBox(

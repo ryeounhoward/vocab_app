@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -21,6 +22,17 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   List<Map<String, dynamic>> _allWordsPool = [];
   int _currentIndex = 0;
   int _score = 0;
+
+  // Timer state
+  bool _isCountdownTimerEnabled = false;
+  bool _isDurationTimerEnabled = false;
+  int _totalDurationSeconds = 0; // for countdown
+  int _remainingSeconds = 0; // for countdown
+  int _elapsedSeconds = 0; // for duration/count-up
+  Timer? _timer;
+  DateTime? _quizStartTime;
+  int _answeredCount = 0;
+  bool _timeOver = false;
 
   // Quiz mode state (aligned with settings page)
   String _quizMode =
@@ -65,6 +77,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   @override
   void dispose() {
     flutterTts.stop();
+    _timer?.cancel();
     _answerController.dispose();
     super.dispose();
   }
@@ -158,10 +171,27 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   Future<void> _generateQuiz() async {
     setState(() => _isLoading = true);
 
+    // Reset any existing timer
+    _timer?.cancel();
+    _timeOver = false;
+    _answeredCount = 0;
+    _elapsedSeconds = 0;
+
     final prefs = await SharedPreferences.getInstance();
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
-    // Load quiz mode from settings
+    // Load quiz mode and timer settings from preferences
     _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+
+    bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
+    bool duration = prefs.getBool('quiz_duration_timer_enabled') ?? !countdown;
+
+    // Ensure mutual exclusivity between countdown and duration timers
+    if (countdown && duration) {
+      duration = false; // Prefer countdown if both somehow true
+    }
+
+    _isCountdownTimerEnabled = countdown;
+    _isDurationTimerEnabled = duration;
 
     final dbHelper = DBHelper();
     final rawData = await dbHelper.queryAll(DBHelper.tableVocab);
@@ -239,8 +269,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       // All other fixed modes
       return _quizMode;
     });
-    _generateOptionsForCurrentQuestion(_allWordsPool);
 
+    // Reset quiz state for a fresh run
     setState(() {
       _currentIndex = 0;
       _score = 0;
@@ -248,6 +278,42 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _selectedAnswer = null;
       _answerController.clear();
       _isLoading = false;
+      _generateOptionsForCurrentQuestion(_allWordsPool);
+      _quizStartTime = DateTime.now();
+      _elapsedSeconds = 0;
+
+      // Start timer if either countdown or duration timer is enabled
+      if ((_isCountdownTimerEnabled || _isDurationTimerEnabled) &&
+          _quizData.isNotEmpty) {
+        if (_isCountdownTimerEnabled) {
+          _totalDurationSeconds = _quizData.length * 60;
+          _remainingSeconds = _totalDurationSeconds;
+        } else {
+          _totalDurationSeconds = 0;
+          _remainingSeconds = 0;
+        }
+
+        _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+
+          setState(() {
+            _elapsedSeconds++;
+
+            if (_isCountdownTimerEnabled) {
+              if (_remainingSeconds <= 1) {
+                _remainingSeconds = 0;
+                timer.cancel();
+                _handleTimeUp();
+              } else {
+                _remainingSeconds--;
+              }
+            }
+          });
+        });
+      }
     });
   }
 
@@ -325,7 +391,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   }
 
   void _submitPictureAnswer() {
-    if (_isAnswered) return;
+    if (_isAnswered || _timeOver) return;
 
     final userAnswer = _answerController.text.trim();
     if (userAnswer.isEmpty) {
@@ -341,6 +407,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     setState(() {
       _isAnswered = true;
       _selectedAnswer = userAnswer;
+      _answeredCount++;
       if (isCorrect) {
         _score++;
       }
@@ -348,7 +415,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   }
 
   void _submitAnswer(String answer) {
-    if (_isAnswered) return;
+    if (_isAnswered || _timeOver) return;
 
     String correctAnswer = _getCorrectAnswerForCurrentQuestion();
     bool isCorrect = (answer == correctAnswer);
@@ -363,6 +430,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       if (isCorrect) {
         _score++;
       }
+
+      _answeredCount++;
     });
   }
 
@@ -379,8 +448,20 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _answerController.clear();
       });
     } else {
+      // Finished all questions before timer expired
+      _timer?.cancel();
       _showResultDialog();
     }
+  }
+
+  void _handleTimeUp() {
+    if (!mounted || _timeOver) return;
+
+    setState(() {
+      _timeOver = true;
+    });
+
+    _showTimeUpDialog();
   }
 
   Future<void> _speakCurrentMeaning() async {
@@ -410,6 +491,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     // Play game result sound based on final score
     _playResultSound();
+
+    // Compute summary numbers (works for all modes and with/without timers)
+    final int totalItems = _quizData.length;
+    final int answered = _answeredCount.clamp(0, totalItems);
+    final int correct = _score.clamp(0, answered);
+    final int wrong = (answered - correct).clamp(0, totalItems);
+    final int notAnswered = (totalItems - answered).clamp(0, totalItems);
+
+    Duration? elapsedDuration;
+    if (_quizStartTime != null) {
+      int elapsedSeconds;
+
+      if (_elapsedSeconds > 0) {
+        elapsedSeconds = _elapsedSeconds;
+      } else {
+        elapsedSeconds = DateTime.now().difference(_quizStartTime!).inSeconds;
+      }
+
+      if (_isCountdownTimerEnabled && _totalDurationSeconds > 0) {
+        elapsedSeconds = elapsedSeconds.clamp(0, _totalDurationSeconds);
+      }
+
+      if (elapsedSeconds < 0) elapsedSeconds = 0;
+      elapsedDuration = Duration(seconds: elapsedSeconds);
+    }
 
     showDialog(
       context: context,
@@ -446,6 +552,22 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                 letterSpacing: 1.2,
               ),
             ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (elapsedDuration != null)
+                    Text('Duration: ${_formatDuration(elapsedDuration)}'),
+                  if (elapsedDuration != null) const SizedBox(height: 8),
+                  Text('Total items: $totalItems'),
+                  Text('Correct: $correct'),
+                  Text('Wrong: $wrong'),
+                  Text('Not answered: $notAnswered'),
+                ],
+              ),
+            ),
             const SizedBox(height: 20),
           ],
         ),
@@ -474,6 +596,74 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         ],
       ),
     );
+  }
+
+  void _showTimeUpDialog() {
+    if (_quizData.isEmpty) return;
+
+    final int totalItems = _quizData.length;
+    final int answered = _answeredCount.clamp(0, totalItems);
+    final int correct = _score.clamp(0, answered);
+    final int wrong = (answered - correct).clamp(0, totalItems);
+    final int notAnswered = (totalItems - answered).clamp(0, totalItems);
+
+    final int baseSeconds = _elapsedSeconds > 0
+        ? _elapsedSeconds
+        : _totalDurationSeconds;
+    final Duration totalDuration = Duration(
+      seconds: baseSeconds.clamp(0, 86400 * 7),
+    );
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Time is up!'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Total time: ${_formatDuration(totalDuration)}'),
+            const SizedBox(height: 12),
+            Text('Total items: $totalItems'),
+            Text('Answered: $answered'),
+            Text('Correct: $correct'),
+            Text('Wrong: $wrong'),
+            Text('Not answered: $notAnswered'),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _generateQuiz();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text(
+              'QUIZ AGAIN',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final int hours = d.inHours;
+    final int minutes = d.inMinutes.remainder(60);
+    final int seconds = d.inSeconds.remainder(60);
+
+    final parts = <String>[];
+    if (hours > 0) parts.add('${hours}h');
+    if (minutes > 0 || hours > 0) parts.add('${minutes}m');
+    parts.add('${seconds}s');
+    return parts.join(' ');
   }
 
   @override
@@ -552,10 +742,35 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
             minHeight: 8,
           ),
           const SizedBox(height: 10),
-          Text(
-            "Question ${_currentIndex + 1} of ${_quizData.length}",
-            style: const TextStyle(color: Colors.grey, fontSize: 16),
-            textAlign: TextAlign.right,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              if (!_timeOver && _isCountdownTimerEnabled)
+                Text(
+                  'Time left: ${_formatDuration(Duration(seconds: _remainingSeconds))}',
+                  style: const TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                )
+              else if (!_timeOver && _isDurationTimerEnabled)
+                Text(
+                  'Time: ${_formatDuration(Duration(seconds: _elapsedSeconds))}',
+                  style: const TextStyle(
+                    color: Colors.indigo,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
+              Text(
+                "Question ${_currentIndex + 1} of ${_quizData.length}",
+                style: const TextStyle(color: Colors.grey, fontSize: 16),
+                textAlign: TextAlign.right,
+              ),
+            ],
           ),
 
           const SizedBox(height: 20),

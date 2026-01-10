@@ -16,6 +16,8 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
   int _currentLimit = 10;
   bool _enableSound = true;
   bool _enableResultSound = true;
+  bool _enableCountdownTimer = false;
+  bool _enableDurationTimer = false;
   String _quizMode = 'desc_to_word'; // Default mode
 
   @override
@@ -30,6 +32,17 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
       _currentLimit = prefs.getInt('quiz_total_items') ?? 10;
       _enableSound = prefs.getBool('quiz_sound_enabled') ?? true;
       _enableResultSound = prefs.getBool('quiz_result_sound_enabled') ?? true;
+      bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
+      bool duration =
+          prefs.getBool('quiz_duration_timer_enabled') ?? !countdown;
+
+      // Ensure only one timer type is enabled at a time
+      if (countdown && duration) {
+        duration = false; // Prefer countdown if both somehow true
+      }
+
+      _enableCountdownTimer = countdown;
+      _enableDurationTimer = duration;
       // Load quiz mode (defaulting to description -> word if not set)
       _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
       _countController.text = _currentLimit.toString();
@@ -49,6 +62,8 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     await prefs.setInt('quiz_total_items', newLimit);
     await prefs.setBool('quiz_sound_enabled', _enableSound);
     await prefs.setBool('quiz_result_sound_enabled', _enableResultSound);
+    await prefs.setBool('quiz_timer_enabled', _enableCountdownTimer);
+    await prefs.setBool('quiz_duration_timer_enabled', _enableDurationTimer);
     await prefs.setString('quiz_mode', _quizMode); // Save the mode
 
     setState(() {
@@ -97,7 +112,43 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
           ),
           const Divider(height: 30),
 
-          // --- SECTION 2: QUIZ MODE ---
+          // --- SECTION 2: TIMER ---
+          const Text(
+            "Timer",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 10),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Countdown timer"),
+            subtitle: const Text(
+              "60 seconds per question. Total time = items × 60.",
+            ),
+            activeColor: Colors.indigo,
+            value: _enableCountdownTimer,
+            onChanged: (val) {
+              setState(() {
+                _enableCountdownTimer = val;
+                if (val) _enableDurationTimer = false;
+              });
+            },
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Duration timer"),
+            subtitle: const Text("Count how long you take to finish the quiz."),
+            activeColor: Colors.indigo,
+            value: _enableDurationTimer,
+            onChanged: (val) {
+              setState(() {
+                _enableDurationTimer = val;
+                if (val) _enableCountdownTimer = false;
+              });
+            },
+          ),
+          const Divider(height: 30),
+
+          // --- SECTION 3: QUIZ MODE ---
           const Text(
             "Quiz Mode",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -151,7 +202,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
 
           const Divider(height: 30),
 
-          // --- SECTION 3: COUNT ---
+          // --- SECTION 4: COUNT ---
           const Text(
             "Question Count",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -176,7 +227,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             ),
           ),
 
-          const SizedBox(height: 40),
+          const SizedBox(height: 20),
 
           // --- SAVE BUTTON ---
           SizedBox(
@@ -196,6 +247,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
               ),
             ),
           ),
+          const SizedBox(height: 40),
         ],
       ),
     );
