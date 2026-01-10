@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 
@@ -50,6 +51,22 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
     super.dispose();
   }
 
+  Future<void> _playFavoriteSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final enabled = prefs.getBool('favorite_sound_enabled') ?? true;
+      if (!enabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/star.mp3'));
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint('Error playing favorite sound: $e');
+    }
+  }
+
   // UPDATED: Direct speech logic for idioms
   Future<void> _speak(String idiom, String desc, List<String> examples) async {
     await flutterTts.stop();
@@ -87,6 +104,10 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
     setState(() {
       currentItem = {...currentItem, 'is_favorite': newStatus};
     });
+
+    if (newStatus == 1) {
+      _playFavoriteSound();
+    }
   }
 
   @override
@@ -98,10 +119,7 @@ class _IdiomDetailPageState extends State<IdiomDetailPage> {
         .toList();
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(currentItem['idiom'] ?? "Idiom Detail"),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text("Idiom"), centerTitle: true),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
         child: Column(

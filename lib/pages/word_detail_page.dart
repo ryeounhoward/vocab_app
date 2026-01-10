@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 
@@ -49,6 +50,22 @@ class _WordDetailPageState extends State<WordDetailPage> {
     super.dispose();
   }
 
+  Future<void> _playFavoriteSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final enabled = prefs.getBool('favorite_sound_enabled') ?? true;
+      if (!enabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/star.mp3'));
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint('Error playing favorite sound: $e');
+    }
+  }
+
   Future<void> _speak(
     String word,
     String type,
@@ -95,6 +112,10 @@ class _WordDetailPageState extends State<WordDetailPage> {
     setState(() {
       currentItem = {...currentItem, 'is_favorite': newStatus};
     });
+
+    if (newStatus == 1) {
+      _playFavoriteSound();
+    }
   }
 
   @override

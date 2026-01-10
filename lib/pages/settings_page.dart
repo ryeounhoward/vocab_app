@@ -103,8 +103,8 @@ class SettingsPage extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.style, color: Colors.indigo),
-            title: const Text("Practice Preferences"),
-            subtitle: const Text("Set your practice session preferences"),
+            title: const Text("Review & Practice Preferences"),
+            subtitle: const Text("Set your review and practice preferences"),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
               Navigator.push(

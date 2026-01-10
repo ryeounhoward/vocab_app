@@ -178,12 +178,25 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
                     child: Text("Picture to Word"),
                   ),
                   DropdownMenuItem(
+                    value: 'idiom_desc_to_idiom',
+                    child: Text("Meaning to Idiom"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'idiom_to_desc',
+                    child: Text("Idiom to Meaning"),
+                  ),
+                  DropdownMenuItem(
                     value: 'mixed',
                     child: Text("Word & Definition (Mixed)"),
                   ),
                   DropdownMenuItem(
                     value: 'mixed_with_pic',
                     child: Text("Picture, Word & Definition (Mixed)"),
+                  ),
+
+                  DropdownMenuItem(
+                    value: 'idiom_mixed',
+                    child: Text("Idiom & Meaning (Mixed)"),
                   ),
                 ],
                 onChanged: (String? newValue) {

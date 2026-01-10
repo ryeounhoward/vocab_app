@@ -11,6 +11,7 @@ class PracticePreferencesPage extends StatefulWidget {
 
 class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
   bool _enableSwooshSound = true;
+  bool _enableFavoriteSound = true;
 
   @override
   void initState() {
@@ -23,6 +24,7 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
     setState(() {
       _enableSwooshSound =
           prefs.getBool('practice_swoosh_sound_enabled') ?? true;
+      _enableFavoriteSound = prefs.getBool('favorite_sound_enabled') ?? true;
     });
   }
 
@@ -36,11 +38,21 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
     }
   }
 
+  Future<void> _updateFavoriteSound(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('favorite_sound_enabled', value);
+    if (mounted) {
+      setState(() {
+        _enableFavoriteSound = value;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Practice Preferences'),
+        title: const Text('Review & Practice Preferences'),
         centerTitle: true,
       ),
       body: ListView(
@@ -60,6 +72,14 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
             activeColor: Colors.indigo,
             value: _enableSwooshSound,
             onChanged: (val) => _updateSwooshSound(val),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Enable Favorite Star Sound'),
+            subtitle: const Text('Play a sound when marking items as favorite'),
+            activeColor: Colors.indigo,
+            value: _enableFavoriteSound,
+            onChanged: (val) => _updateFavoriteSound(val),
           ),
         ],
       ),

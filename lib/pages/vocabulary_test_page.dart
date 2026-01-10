@@ -36,7 +36,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
   // Quiz mode state (aligned with settings page)
   String _quizMode =
-      'desc_to_word'; // desc_to_word, word_to_desc, mixed, pic_to_word, mixed_with_pic
+      'desc_to_word'; // vocab: desc_to_word, word_to_desc, mixed, pic_to_word, mixed_with_pic; idioms: idiom_desc_to_idiom, idiom_to_desc, idiom_mixed
   List<String> _questionModes = []; // per-question mode (for mixed)
 
   // Logic for the current question
@@ -194,7 +194,16 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _isDurationTimerEnabled = duration;
 
     final dbHelper = DBHelper();
-    final rawData = await dbHelper.queryAll(DBHelper.tableVocab);
+
+    // Decide which table to use based on quiz mode
+    final bool isIdiomQuiz =
+        _quizMode == 'idiom_desc_to_idiom' ||
+        _quizMode == 'idiom_to_desc' ||
+        _quizMode == 'idiom_mixed';
+
+    final rawData = await dbHelper.queryAll(
+      isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
+    );
 
     List<Map<String, dynamic>> allWords = List.from(rawData);
 
@@ -246,12 +255,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _questionModes = List<String>.generate(_quizData.length, (index) {
       final question = _quizData[index];
 
-      // Mixed (Random): word & definition only
+      // Mixed (Random): word & definition only (vocabulary)
       if (_quizMode == 'mixed') {
         return Random().nextBool() ? 'desc_to_word' : 'word_to_desc';
       }
 
-      // Mixed with picture: picture, word & definition
+      // Mixed with picture: picture, word & definition (vocabulary)
       if (_quizMode == 'mixed_with_pic') {
         final hasImage =
             question['image_path'] != null &&
@@ -264,6 +273,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           // No image for this word: fall back to text-only modes
           return Random().nextBool() ? 'desc_to_word' : 'word_to_desc';
         }
+      }
+
+      // Idioms mixed: idiom & meaning
+      if (_quizMode == 'idiom_mixed') {
+        return Random().nextBool() ? 'idiom_desc_to_idiom' : 'idiom_to_desc';
       }
 
       // All other fixed modes
@@ -333,7 +347,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     // For desc_to_word: question = description, options = words
     // For word_to_desc: question = word, options = descriptions
-    if (currentMode == 'word_to_desc') {
+    // For idiom_to_desc: question = idiom, options = meanings
+    if (currentMode == 'word_to_desc' || currentMode == 'idiom_to_desc') {
       final String correctDescription =
           (currentQuestion['description'] ?? 'No Description').toString();
 
@@ -356,11 +371,14 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
       _currentOptions = options;
     } else {
-      final String correctWord = (currentQuestion['word'] ?? '').toString();
+      // For desc_to_word: options are vocabulary words
+      // For idiom_desc_to_idiom: options are idioms
+      final String key = currentMode.startsWith('idiom') ? 'idiom' : 'word';
+      final String correctTerm = (currentQuestion[key] ?? '').toString();
 
       List<String> distractors = pool
-          .where((w) => (w['word'] ?? '') != currentQuestion['word'])
-          .map((w) => (w['word'] ?? '').toString())
+          .where((w) => (w[key] ?? '') != currentQuestion[key])
+          .map((w) => (w[key] ?? '').toString())
           .where((w) => w.trim().isNotEmpty)
           .toSet()
           .toList();
@@ -368,7 +386,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       distractors.shuffle();
       List<String> options = distractors.take(3).toList();
 
-      options.add(correctWord);
+      options.add(correctTerm);
       options.shuffle();
 
       _currentOptions = options;
@@ -383,10 +401,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         ? _questionModes[_currentIndex]
         : _quizMode;
 
-    if (currentMode == 'word_to_desc') {
+    if (currentMode == 'word_to_desc' || currentMode == 'idiom_to_desc') {
       return (currentQuestion['description'] ?? 'No Description').toString();
     } else {
-      return (currentQuestion['word'] ?? '').toString();
+      final String key = currentMode.startsWith('idiom') ? 'idiom' : 'word';
+      return (currentQuestion[key] ?? '').toString();
     }
   }
 
@@ -690,28 +709,15 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.library_books, size: 60, color: Colors.grey),
-              const SizedBox(height: 20),
-              Text(
-                _quizMode == 'pic_to_word'
-                    ? "No words with pictures."
-                    : "Not enough words.",
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
               Text(
                 _quizMode == 'pic_to_word'
                     ? "Add images to your vocabulary words to play this mode."
+                    : (_quizMode == 'idiom_desc_to_idiom' ||
+                          _quizMode == 'idiom_to_desc' ||
+                          _quizMode == 'idiom_mixed')
+                    ? "You need at least 4 idioms in your idiom list to start a quiz."
                     : "You need at least 4 words in your vocabulary list to start a quiz.",
                 textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Go Back"),
               ),
             ],
           ),
@@ -724,9 +730,15 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         ? _questionModes[_currentIndex]
         : _quizMode;
 
-    final String questionText = currentMode == 'word_to_desc'
-        ? (currentQuestion['word'] ?? 'No Word').toString()
-        : (currentQuestion['description'] ?? 'No Description').toString();
+    String questionText;
+    if (currentMode == 'word_to_desc') {
+      questionText = (currentQuestion['word'] ?? 'No Word').toString();
+    } else if (currentMode == 'idiom_to_desc') {
+      questionText = (currentQuestion['idiom'] ?? 'No Idiom').toString();
+    } else {
+      questionText = (currentQuestion['description'] ?? 'No Description')
+          .toString();
+    }
 
     final String correctAnswer = _getCorrectAnswerForCurrentQuestion();
 
@@ -945,6 +957,10 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                     Text(
                       currentMode == 'word_to_desc'
                           ? 'WHAT DOES THIS WORD MEAN?'
+                          : currentMode == 'idiom_to_desc'
+                          ? 'WHAT DOES THIS IDIOM MEAN?'
+                          : currentMode == 'idiom_desc_to_idiom'
+                          ? 'WHICH IDIOM MATCHES THIS MEANING?'
                           : 'WHAT WORD MATCHES THIS MEANING?',
                       style: const TextStyle(
                         fontSize: 12,

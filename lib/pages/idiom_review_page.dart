@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import 'search_page_idiom.dart';
@@ -54,6 +55,22 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
     flutterTts.stop();
     _pageController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _playFavoriteSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final enabled = prefs.getBool('favorite_sound_enabled') ?? true;
+      if (!enabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/star.mp3'));
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint('Error playing favorite sound: $e');
+    }
   }
 
   // --- LOAD DATA & SHUFFLE ---
@@ -127,22 +144,50 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       updatedItem['is_favorite'] = newStatus;
       _idiomList[indexInList] = updatedItem;
     });
+
+    if (newStatus == 1) {
+      _playFavoriteSound();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: const Text("Idioms"),
+          centerTitle: true,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (_idiomList.isEmpty) {
-      return const Scaffold(
-        body: Center(child: Text("No idioms found. Please add some first.")),
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: const Text("Idioms"),
+          centerTitle: true,
+        ),
+        body: const Center(
+          child: Text("No idioms found. Please add some first."),
+        ),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         title: const Text("Idioms"),
         centerTitle: true,
         actions: [

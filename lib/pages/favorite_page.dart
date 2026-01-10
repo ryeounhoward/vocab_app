@@ -227,7 +227,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                               width: 60,
                               height: 60,
                               color: Colors.grey[200],
-                              child: Icon(isIdiom ? Icons.style : Icons.image),
+                              child: Icon(isIdiom ? Icons.image : Icons.image),
                             ),
                     ),
                     title: Text(

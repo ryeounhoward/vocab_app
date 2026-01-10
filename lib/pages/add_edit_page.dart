@@ -28,7 +28,8 @@ class _AddEditPageState extends State<AddEditPage> {
   String? _imagePath;
   bool _isDownloading = false; // To show loading while downloading image
 
-  final List<String> _types = [
+  // Allow dynamic list so user can add new categories
+  List<String> _types = [
     'Noun',
     'Verb',
     'Pronoun',
@@ -39,6 +40,8 @@ class _AddEditPageState extends State<AddEditPage> {
     'Interjection',
   ];
 
+  final String _addNewTypeLabel = 'Add new type';
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +50,11 @@ class _AddEditPageState extends State<AddEditPage> {
       _descController.text = widget.vocabItem!['description'] ?? "";
       _wordType = widget.vocabItem!['word_type'];
       _imagePath = widget.vocabItem!['image_path'];
+
+      // Ensure stored word type appears in the list
+      if (_wordType != null && !_types.contains(_wordType)) {
+        _types.add(_wordType!);
+      }
 
       String savedExamples = widget.vocabItem!['examples'] as String? ?? "";
       if (savedExamples.isNotEmpty) {
@@ -60,55 +68,61 @@ class _AddEditPageState extends State<AddEditPage> {
   }
 
   // --- NEW: Function to download image from URL ---
-Future<String?> _downloadImage(String url) async {
-  try {
-    setState(() => _isDownloading = true);
-    final response = await http.get(Uri.parse(url));
-    if (response.statusCode == 200) {
+  Future<String?> _downloadImage(String url) async {
+    try {
+      setState(() => _isDownloading = true);
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        // 1. Get path and ensure "images" folder exists
+        final documentDirectory = await getApplicationDocumentsDirectory();
+        final imagesDir = Directory(
+          path.join(documentDirectory.path, "images"),
+        );
+        if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
+
+        // 2. Create unique filename
+        String fileName = "vocab_${DateTime.now().millisecondsSinceEpoch}.png";
+        File file = File(path.join(imagesDir.path, fileName));
+
+        // 3. Write bytes
+        await file.writeAsBytes(response.bodyBytes);
+        return file.path; // Returns the permanent path
+      }
+    } catch (e) {
+      debugPrint("Download error: $e");
+    } finally {
+      setState(() => _isDownloading = false);
+    }
+    return null;
+  }
+
+  Future<void> _pickImage() async {
+    final pickedFile = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+    );
+
+    if (pickedFile != null) {
       // 1. Get path and ensure "images" folder exists
       final documentDirectory = await getApplicationDocumentsDirectory();
       final imagesDir = Directory(path.join(documentDirectory.path, "images"));
       if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
 
-      // 2. Create unique filename
-      String fileName = "vocab_${DateTime.now().millisecondsSinceEpoch}.png";
-      File file = File(path.join(imagesDir.path, fileName));
-      
-      // 3. Write bytes
-      await file.writeAsBytes(response.bodyBytes);
-      return file.path; // Returns the permanent path
+      // 2. Create a permanent filename and path
+      String fileName =
+          "gallery_${DateTime.now().millisecondsSinceEpoch}${path.extension(pickedFile.path)}";
+      String permanentPath = path.join(imagesDir.path, fileName);
+
+      // 3. COPY the file from cache to permanent storage
+      File tempFile = File(pickedFile.path);
+      await tempFile.copy(permanentPath);
+
+      setState(() {
+        _imagePath = permanentPath; // Save this path
+        _urlController.clear();
+      });
     }
-  } catch (e) {
-    debugPrint("Download error: $e");
-  } finally {
-    setState(() => _isDownloading = false);
   }
-  return null;
-}
 
-Future<void> _pickImage() async {
-  final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
-  
-  if (pickedFile != null) {
-    // 1. Get path and ensure "images" folder exists
-    final documentDirectory = await getApplicationDocumentsDirectory();
-    final imagesDir = Directory(path.join(documentDirectory.path, "images"));
-    if (!await imagesDir.exists()) await imagesDir.create(recursive: true);
-
-    // 2. Create a permanent filename and path
-    String fileName = "gallery_${DateTime.now().millisecondsSinceEpoch}${path.extension(pickedFile.path)}";
-    String permanentPath = path.join(imagesDir.path, fileName);
-
-    // 3. COPY the file from cache to permanent storage
-    File tempFile = File(pickedFile.path);
-    await tempFile.copy(permanentPath);
-
-    setState(() {
-      _imagePath = permanentPath; // Save this path
-      _urlController.clear();
-    });
-  }
-}
   void _save() async {
     if (_formKey.currentState!.validate()) {
       // Logic: If URL is provided and no gallery image was picked, download it first
@@ -252,10 +266,33 @@ Future<void> _pickImage() async {
                       32, // Full width minus margins
                   initialSelection: _wordType,
                   label: const Text("Word Type"),
-                  onSelected: (v) => setState(() => _wordType = v),
-                  dropdownMenuEntries: _types.map((t) {
-                    return DropdownMenuEntry<String>(value: t, label: t);
-                  }).toList(),
+                  onSelected: (value) async {
+                    if (value == null) return;
+
+                    if (value == _addNewTypeLabel) {
+                      final newType = await _showAddWordTypeDialog();
+                      if (newType != null && newType.trim().isNotEmpty) {
+                        final trimmed = newType.trim();
+                        setState(() {
+                          if (!_types.contains(trimmed)) {
+                            _types.add(trimmed);
+                          }
+                          _wordType = trimmed;
+                        });
+                      }
+                    } else {
+                      setState(() => _wordType = value);
+                    }
+                  },
+                  dropdownMenuEntries: [
+                    ..._types.map((t) {
+                      return DropdownMenuEntry<String>(value: t, label: t);
+                    }),
+                    DropdownMenuEntry<String>(
+                      value: _addNewTypeLabel,
+                      label: _addNewTypeLabel,
+                    ),
+                  ],
                   // Styling the menu card
                   menuStyle: MenuStyle(
                     shape: WidgetStateProperty.all(
@@ -343,5 +380,32 @@ Future<void> _pickImage() async {
 
   void _addExampleField() {
     setState(() => _exampleControllers.add(TextEditingController()));
+  }
+
+  Future<String?> _showAddWordTypeDialog() async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Add new type of speech'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Type (e.g. Phrase)'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
