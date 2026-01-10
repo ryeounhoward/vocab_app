@@ -49,6 +49,24 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   final FlutterTts flutterTts = FlutterTts();
   Map<String, String>? _currentVoice;
 
+  // Cached session so leaving the page does not reset the quiz
+  static List<Map<String, dynamic>>? _cachedQuizData;
+  static List<Map<String, dynamic>>? _cachedAllWordsPool;
+  static List<String> _cachedQuestionModes = [];
+  static List<String> _cachedCurrentOptions = [];
+  static int _cachedCurrentIndex = 0;
+  static int _cachedScore = 0;
+  static bool _cachedIsAnswered = false;
+  static String? _cachedSelectedAnswer;
+  static bool _cachedTimeOver = false;
+  static bool _cachedIsCountdownTimerEnabled = false;
+  static bool _cachedIsDurationTimerEnabled = false;
+  static int _cachedTotalDurationSeconds = 0;
+  static int _cachedRemainingSeconds = 0;
+  static int _cachedElapsedSeconds = 0;
+  static int _cachedAnsweredCount = 0;
+  static String? _cachedQuizMode;
+
   String _getFeedbackMessage() {
     if (_quizData.isEmpty) return "";
 
@@ -71,11 +89,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   void initState() {
     super.initState();
     _initTts();
-    _generateQuiz();
+    _initQuizPage();
   }
 
   @override
   void dispose() {
+    _saveSession();
     flutterTts.stop();
     _timer?.cancel();
     _answerController.dispose();
@@ -168,6 +187,77 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
   }
 
+  // Initialize quiz either from cached session (same mode) or as a new quiz
+  Future<void> _initQuizPage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String mode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+
+    // Restore only if we have a cached quiz with the same mode
+    if (_cachedQuizData != null &&
+        _cachedQuizData!.isNotEmpty &&
+        _cachedQuizMode == mode &&
+        !_cachedTimeOver) {
+      setState(() {
+        _quizMode = mode;
+        _quizData = _cachedQuizData!;
+        _allWordsPool = _cachedAllWordsPool ?? [];
+        _questionModes = List<String>.from(_cachedQuestionModes);
+        _currentOptions = List<String>.from(_cachedCurrentOptions);
+        _currentIndex = _cachedCurrentIndex;
+        _score = _cachedScore;
+        _isAnswered = _cachedIsAnswered;
+        _selectedAnswer = _cachedSelectedAnswer;
+        _timeOver = _cachedTimeOver;
+        _isCountdownTimerEnabled = _cachedIsCountdownTimerEnabled;
+        _isDurationTimerEnabled = _cachedIsDurationTimerEnabled;
+        _totalDurationSeconds = _cachedTotalDurationSeconds;
+        _remainingSeconds = _cachedRemainingSeconds;
+        _elapsedSeconds = _cachedElapsedSeconds;
+        _answeredCount = _cachedAnsweredCount;
+        _isLoading = false;
+        // Recreate a start time based on elapsed seconds
+        _quizStartTime = DateTime.now().subtract(
+          Duration(seconds: _elapsedSeconds),
+        );
+      });
+
+      _startRestoredTimer();
+    } else {
+      // No valid cache or mode changed: start a new quiz
+      _generateQuiz();
+    }
+  }
+
+  void _startRestoredTimer() {
+    if (!(_isCountdownTimerEnabled || _isDurationTimerEnabled) ||
+        _quizData.isEmpty ||
+        _timeOver) {
+      return;
+    }
+
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      setState(() {
+        _elapsedSeconds++;
+
+        if (_isCountdownTimerEnabled) {
+          if (_remainingSeconds <= 1) {
+            _remainingSeconds = 0;
+            timer.cancel();
+            _handleTimeUp();
+          } else {
+            _remainingSeconds--;
+          }
+        }
+      });
+    });
+  }
+
   Future<void> _generateQuiz() async {
     setState(() => _isLoading = true);
 
@@ -192,6 +282,13 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     _isCountdownTimerEnabled = countdown;
     _isDurationTimerEnabled = duration;
+
+    // Clear any previous cached session when starting a fresh quiz
+    _cachedQuizData = null;
+    _cachedAllWordsPool = null;
+    _cachedQuestionModes = [];
+    _cachedCurrentOptions = [];
+    _cachedQuizMode = _quizMode;
 
     final dbHelper = DBHelper();
 
@@ -329,6 +426,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         });
       }
     });
+  }
+
+  void _saveSession() {
+    if (_quizData.isEmpty) return;
+
+    _cachedQuizData = _quizData
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+    _cachedAllWordsPool = _allWordsPool
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+    _cachedQuestionModes = List<String>.from(_questionModes);
+    _cachedCurrentOptions = List<String>.from(_currentOptions);
+    _cachedCurrentIndex = _currentIndex;
+    _cachedScore = _score;
+    _cachedIsAnswered = _isAnswered;
+    _cachedSelectedAnswer = _selectedAnswer;
+    _cachedTimeOver = _timeOver;
+    _cachedIsCountdownTimerEnabled = _isCountdownTimerEnabled;
+    _cachedIsDurationTimerEnabled = _isDurationTimerEnabled;
+    _cachedTotalDurationSeconds = _totalDurationSeconds;
+    _cachedRemainingSeconds = _remainingSeconds;
+    _cachedElapsedSeconds = _elapsedSeconds;
+    _cachedAnsweredCount = _answeredCount;
+    _cachedQuizMode = _quizMode;
   }
 
   void _generateOptionsForCurrentQuestion(List<Map<String, dynamic>> pool) {
@@ -691,7 +813,13 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       appBar: AppBar(
         title: const Text("Vocabulary Quiz"),
         centerTitle: true,
-        // SETTINGS BUTTON REMOVED HERE
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.restart_alt),
+            tooltip: 'Restart quiz',
+            onPressed: _quizData.isEmpty ? null : _confirmRestartQuiz,
+          ),
+        ],
       ),
       body: _buildBody(),
     );
@@ -846,7 +974,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
                                   final String displayText = isCorrect
                                       ? correctAnswer
-                                      : 'Correct word: $correctAnswer';
+                                      : correctAnswer;
 
                                   return Text(
                                     displayText,
@@ -945,63 +1073,89 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
               ),
             ),
           ] else ...[
-            Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 15),
                 child: Column(
                   children: [
-                    Text(
-                      currentMode == 'word_to_desc'
-                          ? 'WHAT DOES THIS WORD MEAN?'
-                          : currentMode == 'idiom_to_desc'
-                          ? 'WHAT DOES THIS IDIOM MEAN?'
-                          : currentMode == 'idiom_desc_to_idiom'
-                          ? 'WHICH IDIOM MATCHES THIS MEANING?'
-                          : 'WHAT WORD MATCHES THIS MEANING?',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey,
-                        letterSpacing: 1.0,
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border.all(
+                          color: Colors.grey.shade300,
+                          width: 2,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            currentMode == 'word_to_desc'
+                                ? 'WHAT DOES THIS WORD MEAN?'
+                                : currentMode == 'idiom_to_desc'
+                                ? 'WHAT DOES THIS IDIOM MEAN?'
+                                : currentMode == 'idiom_desc_to_idiom'
+                                ? 'WHICH IDIOM MATCHES THIS MEANING?'
+                                : 'WHAT WORD MATCHES THIS MEANING?',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          const SizedBox(height: 15),
+                          Text(
+                            questionText,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 15),
-                    Text(
-                      questionText,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        height: 1.4,
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'OPTIONS',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[600],
+                          letterSpacing: 1.0,
+                        ),
                       ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _currentOptions.length,
+                      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+                      itemBuilder: (ctx, i) {
+                        final option = _currentOptions[i];
+                        return _buildOptionButton(option, correctAnswer);
+                      },
                     ),
                   ],
                 ),
               ),
             ),
-
-            const SizedBox(height: 30),
-
-            Expanded(
-              child: ListView.separated(
-                // ADDED BOTTOM PADDING HERE
-                padding: const EdgeInsets.only(bottom: 15),
-                itemCount: _currentOptions.length,
-                separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-                itemBuilder: (ctx, i) {
-                  final option = _currentOptions[i];
-                  return _buildOptionButton(option, correctAnswer);
-                },
-              ),
-            ),
-
+            const SizedBox(height: 16),
             if (_isAnswered)
               SizedBox(
                 height: 50,
+                width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo,
@@ -1075,6 +1229,34 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
             if (icon != null) Icon(icon, color: borderColor),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmRestartQuiz() {
+    if (_quizData.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restart quiz?'),
+        content: const Text(
+          'This will start a new quiz and reset your current progress.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _timer?.cancel();
+              _generateQuiz();
+            },
+            child: const Text('Restart', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
   }

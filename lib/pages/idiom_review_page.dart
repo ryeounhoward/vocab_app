@@ -78,20 +78,42 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
     setState(() => _isLoading = true);
 
     final data = await dbHelper.queryAll(DBHelper.tableIdioms);
-    List<Map<String, dynamic>> shuffledData = List.from(data);
-    shuffledData.shuffle();
+
+    // Read preferred order from settings
+    final prefs = await SharedPreferences.getInstance();
+    final order = prefs.getString('practice_order') ?? 'shuffle';
+
+    // Start from a mutable copy
+    List<Map<String, dynamic>> orderedData = List.from(data);
+
+    if (order == 'az') {
+      orderedData.sort((a, b) {
+        final String aIdiom = (a['idiom'] ?? '').toString().toLowerCase();
+        final String bIdiom = (b['idiom'] ?? '').toString().toLowerCase();
+        return aIdiom.compareTo(bIdiom);
+      });
+    } else if (order == 'za') {
+      orderedData.sort((a, b) {
+        final String aIdiom = (a['idiom'] ?? '').toString().toLowerCase();
+        final String bIdiom = (b['idiom'] ?? '').toString().toLowerCase();
+        return bIdiom.compareTo(aIdiom);
+      });
+    } else {
+      // Default: shuffle randomly
+      orderedData.shuffle();
+    }
 
     int targetIndex = 0;
 
     if (widget.selectedId != null) {
-      targetIndex = shuffledData.indexWhere(
+      targetIndex = orderedData.indexWhere(
         (item) => item['id'] == widget.selectedId,
       );
       if (targetIndex == -1) targetIndex = 0;
     }
 
     setState(() {
-      _idiomList = shuffledData;
+      _idiomList = orderedData;
       _isLoading = false;
       if (_idiomList.isNotEmpty) {
         int initialPage = (_idiomList.length * 100) + targetIndex;

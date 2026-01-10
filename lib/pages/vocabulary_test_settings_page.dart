@@ -179,11 +179,11 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
                   ),
                   DropdownMenuItem(
                     value: 'idiom_desc_to_idiom',
-                    child: Text("Meaning to Idiom"),
+                    child: Text("Definition to Idiom"),
                   ),
                   DropdownMenuItem(
                     value: 'idiom_to_desc',
-                    child: Text("Idiom to Meaning"),
+                    child: Text("Idiom to Definition"),
                   ),
                   DropdownMenuItem(
                     value: 'mixed',

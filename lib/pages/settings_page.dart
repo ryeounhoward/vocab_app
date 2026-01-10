@@ -106,13 +106,22 @@ class SettingsPage extends StatelessWidget {
             title: const Text("Review & Practice Preferences"),
             subtitle: const Text("Set your review and practice preferences"),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.push(
+            onTap: () async {
+              final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => const PracticePreferencesPage(),
                 ),
               );
+
+              if (result == true && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Practice Preferences Saved!"),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
             },
           ),
 

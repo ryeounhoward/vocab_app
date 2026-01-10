@@ -86,7 +86,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
     }
 
     if (mounted) {
-      String message = "Settings Saved!";
+      String message = "Preferences Saved!";
       if (_isActive && _isExactHour) {
         message += " First alert at next hour.";
       }

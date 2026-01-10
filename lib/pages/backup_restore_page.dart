@@ -20,7 +20,48 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
   void _showSnackBar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // --- Loading dialog helpers ---
+  Future<void> _showLoadingDialog(String message) async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            content: Row(
+              children: [
+                const SizedBox(
+                  height: 32,
+                  width: 32,
+                  child: CircularProgressIndicator(),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(message, style: const TextStyle(fontSize: 14)),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _hideLoadingDialog() {
+    if (!mounted) return;
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
 
   // --- HELPER: GET LOCAL IMAGE DIRECTORY ---
@@ -39,8 +80,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   Future<void> _exportData() async {
     try {
-      List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(DBHelper.tableVocab);
-      List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(DBHelper.tableIdioms);
+      await _showLoadingDialog("Exporting JSON backup...");
+      List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(
+        DBHelper.tableVocab,
+      );
+      List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(
+        DBHelper.tableIdioms,
+      );
 
       if (vocabData.isEmpty && idiomData.isEmpty) {
         _showSnackBar("No data found to export");
@@ -67,6 +113,8 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       }
     } catch (e) {
       _showSnackBar("Export Error: $e");
+    } finally {
+      _hideLoadingDialog();
     }
   }
 
@@ -75,7 +123,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   Future<void> _importData() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+      );
 
       if (result != null && result.files.single.path != null) {
         File file = File(result.files.single.path!);
@@ -100,16 +150,37 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
               "Items found:\n- Words: ${vocabToProcess.length}\n- Idioms: ${idiomsToProcess.length}\n\nExisting items will be skipped. Continue?",
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Import")),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Import"),
+              ),
             ],
           ),
         );
 
         if (confirm == true) {
-          int addedWords = await _processImport(vocabToProcess, DBHelper.tableVocab, 'word');
-          int addedIdioms = await _processImport(idiomsToProcess, DBHelper.tableIdioms, 'idiom');
-          _showSnackBar("Import Finished!\nAdded: $addedWords words, $addedIdioms idioms.");
+          await _showLoadingDialog("Importing JSON backup...");
+          try {
+            int addedWords = await _processImport(
+              vocabToProcess,
+              DBHelper.tableVocab,
+              'word',
+            );
+            int addedIdioms = await _processImport(
+              idiomsToProcess,
+              DBHelper.tableIdioms,
+              'idiom',
+            );
+            _showSnackBar(
+              "Import Finished!\nAdded: $addedWords words, $addedIdioms idioms.",
+            );
+          } finally {
+            _hideLoadingDialog();
+          }
         }
       }
     } catch (e) {
@@ -122,8 +193,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   Future<void> _exportToZip() async {
     try {
-      List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(DBHelper.tableVocab);
-      List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(DBHelper.tableIdioms);
+      await _showLoadingDialog("Exporting ZIP backup (data + photos)...");
+      List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(
+        DBHelper.tableVocab,
+      );
+      List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(
+        DBHelper.tableIdioms,
+      );
 
       if (vocabData.isEmpty && idiomData.isEmpty) {
         _showSnackBar("No data found to export");
@@ -139,7 +215,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         "idioms": idiomData,
       });
       List<int> jsonBytes = utf8.encode(jsonString);
-      archive.addFile(ArchiveFile('data/backup.json', jsonBytes.length, jsonBytes));
+      archive.addFile(
+        ArchiveFile('data/backup.json', jsonBytes.length, jsonBytes),
+      );
 
       // Add Photos from app folder to ZIP
       String imagesPath = await _getLocalImagesPath();
@@ -149,7 +227,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         for (var file in files) {
           if (file is File) {
             List<int> bytes = await file.readAsBytes();
-            archive.addFile(ArchiveFile('images/${p.basename(file.path)}', bytes.length, bytes));
+            archive.addFile(
+              ArchiveFile(
+                'images/${p.basename(file.path)}',
+                bytes.length,
+                bytes,
+              ),
+            );
           }
         }
       }
@@ -166,6 +250,8 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       _showSnackBar("ZIP Backup saved successfully!");
     } catch (e) {
       _showSnackBar("Export Error: $e");
+    } finally {
+      _hideLoadingDialog();
     }
   }
 
@@ -183,7 +269,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         File zipFile = File(result.files.single.path!);
         Uint8List bytes = await zipFile.readAsBytes();
         Archive archive = ZipDecoder().decodeBytes(bytes);
-        
+
         // Find and decode the JSON data
         ArchiveFile? jsonFile = archive.findFile('data/backup.json');
         if (jsonFile == null) {
@@ -215,18 +301,41 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text("Import ZIP Backup"),
-            content: Text("Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n\nContinue?"),
+            content: Text(
+              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n\nContinue?",
+            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Import")),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Import"),
+              ),
             ],
           ),
         );
 
         if (confirm == true) {
-          int addedWords = await _processImport(vocabToProcess, DBHelper.tableVocab, 'word');
-          int addedIdioms = await _processImport(idiomsToProcess, DBHelper.tableIdioms, 'idiom');
-          _showSnackBar("Import Success!\nAdded $addedWords words, $addedIdioms idioms, and $photoCount photos.");
+          await _showLoadingDialog("Importing ZIP backup (data + photos)...");
+          try {
+            int addedWords = await _processImport(
+              vocabToProcess,
+              DBHelper.tableVocab,
+              'word',
+            );
+            int addedIdioms = await _processImport(
+              idiomsToProcess,
+              DBHelper.tableIdioms,
+              'idiom',
+            );
+            _showSnackBar(
+              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, and $photoCount photos.",
+            );
+          } finally {
+            _hideLoadingDialog();
+          }
         }
       }
     } catch (e) {
@@ -235,10 +344,18 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   }
 
   // Helper function shared by both Import methods
-  Future<int> _processImport(List<dynamic> list, String tableName, String keyName) async {
+  Future<int> _processImport(
+    List<dynamic> list,
+    String tableName,
+    String keyName,
+  ) async {
     if (list.isEmpty) return 0;
-    List<Map<String, dynamic>> existingData = await _dbHelper.queryAll(tableName);
-    Set<String> existingKeys = existingData.map((e) => e[keyName].toString().toLowerCase().trim()).toSet();
+    List<Map<String, dynamic>> existingData = await _dbHelper.queryAll(
+      tableName,
+    );
+    Set<String> existingKeys = existingData
+        .map((e) => e[keyName].toString().toLowerCase().trim())
+        .toSet();
 
     int addedCount = 0;
     for (var item in list) {
@@ -246,7 +363,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       if (row.containsKey(keyName)) {
         String keyInJson = row[keyName].toString().toLowerCase().trim();
         if (!existingKeys.contains(keyInJson)) {
-          row.remove('id'); 
+          row.remove('id');
           await _dbHelper.insert(row, tableName);
           existingKeys.add(keyInJson);
           addedCount++;
@@ -263,28 +380,70 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text("Full Backup (Database + Photos)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Text(
+            "Full Backup (Database + Photos)",
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+          ),
           const SizedBox(height: 10),
-          _buildCard("Export Full ZIP", "Save everything including images", Icons.all_inclusive, Colors.deepPurple, _exportToZip),
-          _buildCard("Import Full ZIP", "Restore everything from ZIP", Icons.unarchive, Colors.orange, _importFromZip),
-          
-          const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider()),
-          
-          const Text("Legacy Backup (Data Only)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          _buildCard(
+            "Export Full ZIP",
+            "Save everything including images",
+            Icons.all_inclusive,
+            Colors.deepPurple,
+            _exportToZip,
+          ),
+          _buildCard(
+            "Import Full ZIP",
+            "Restore everything from ZIP",
+            Icons.unarchive,
+            Colors.orange,
+            _importFromZip,
+          ),
+
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Divider(),
+          ),
+
+          const Text(
+            "Legacy Backup (Data Only)",
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+          ),
           const SizedBox(height: 10),
-          _buildCard("Export JSON", "Save only words and idioms", Icons.file_upload, Colors.blue, _exportData),
-          _buildCard("Import JSON", "Restore from a JSON file", Icons.file_download, Colors.green, _importData),
+          _buildCard(
+            "Export JSON",
+            "Save only words and idioms",
+            Icons.file_upload,
+            Colors.blue,
+            _exportData,
+          ),
+          _buildCard(
+            "Import JSON",
+            "Restore from a JSON file",
+            Icons.file_download,
+            Colors.green,
+            _importData,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildCard(String title, String sub, IconData icon, Color col, VoidCallback tap) {
+  Widget _buildCard(
+    String title,
+    String sub,
+    IconData icon,
+    Color col,
+    VoidCallback tap,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       child: ListTile(
-        leading: CircleAvatar(backgroundColor: col, child: Icon(icon, color: Colors.white)),
+        leading: CircleAvatar(
+          backgroundColor: col,
+          child: Icon(icon, color: Colors.white),
+        ),
         title: Text(title),
         subtitle: Text(sub),
         onTap: tap,

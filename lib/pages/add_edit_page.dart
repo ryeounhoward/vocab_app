@@ -264,6 +264,8 @@ class _AddEditPageState extends State<AddEditPage> {
                   width:
                       MediaQuery.of(context).size.width -
                       32, // Full width minus margins
+                  // Limit menu height so long lists become scrollable
+                  menuHeight: 250,
                   initialSelection: _wordType,
                   label: const Text("Word Type"),
                   onSelected: (value) async {

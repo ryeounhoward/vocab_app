@@ -53,19 +53,41 @@ class _ReviewPageState extends State<ReviewPage> {
   void _loadAndShuffle() async {
     // ONLY vocabulary words
     final data = await dbHelper.queryAll(DBHelper.tableVocab);
-    List<Map<String, dynamic>> shuffledData = List.from(data);
-    shuffledData.shuffle();
+
+    // Read preferred order from settings
+    final prefs = await SharedPreferences.getInstance();
+    final order = prefs.getString('practice_order') ?? 'shuffle';
+
+    // Start from a mutable copy
+    List<Map<String, dynamic>> orderedData = List.from(data);
+
+    if (order == 'az') {
+      orderedData.sort((a, b) {
+        final String aWord = (a['word'] ?? '').toString().toLowerCase();
+        final String bWord = (b['word'] ?? '').toString().toLowerCase();
+        return aWord.compareTo(bWord);
+      });
+    } else if (order == 'za') {
+      orderedData.sort((a, b) {
+        final String aWord = (a['word'] ?? '').toString().toLowerCase();
+        final String bWord = (b['word'] ?? '').toString().toLowerCase();
+        return bWord.compareTo(aWord);
+      });
+    } else {
+      // Default: shuffle randomly
+      orderedData.shuffle();
+    }
 
     int targetIndex = 0;
     if (widget.selectedId != null) {
-      targetIndex = shuffledData.indexWhere(
+      targetIndex = orderedData.indexWhere(
         (item) => item['id'] == widget.selectedId,
       );
       if (targetIndex == -1) targetIndex = 0;
     }
 
     setState(() {
-      _vocabList = shuffledData;
+      _vocabList = orderedData;
       _isLoading = false;
       if (_vocabList.isNotEmpty) {
         int initialPage = (_vocabList.length * 100) + targetIndex;

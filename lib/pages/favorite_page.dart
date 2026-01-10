@@ -17,6 +17,7 @@ class _FavoritesPageState extends State<FavoritesPage>
   List<Map<String, dynamic>> _favoriteList = [];
   List<Map<String, dynamic>> _filteredList = [];
   bool _isLoading = true;
+  bool _isAscending = true; // sort order
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -90,7 +91,31 @@ class _FavoritesPageState extends State<FavoritesPage>
         return textToSearch.contains(enteredKeyword.toLowerCase());
       }).toList();
     }
+    _applySort(results);
     setState(() => _filteredList = results);
+  }
+
+  void _applySort(List<Map<String, dynamic>> list) {
+    list.sort((a, b) {
+      final bool aIsIdiom = a['origin_table'] == DBHelper.tableIdioms;
+      final bool bIsIdiom = b['origin_table'] == DBHelper.tableIdioms;
+      final String aName = aIsIdiom
+          ? (a['idiom'] ?? '').toString().toLowerCase()
+          : (a['word'] ?? '').toString().toLowerCase();
+      final String bName = bIsIdiom
+          ? (b['idiom'] ?? '').toString().toLowerCase()
+          : (b['word'] ?? '').toString().toLowerCase();
+
+      final int cmp = aName.compareTo(bName);
+      return _isAscending ? cmp : -cmp;
+    });
+  }
+
+  void _toggleSortOrder() {
+    setState(() {
+      _isAscending = !_isAscending;
+      _runFilter(_searchController.text);
+    });
   }
 
   Future<void> _showRemoveModal(
@@ -173,93 +198,126 @@ class _FavoritesPageState extends State<FavoritesPage>
           ? const Center(child: Text("No favorites yet."))
           : _filteredList.isEmpty
           ? const Center(child: Text("No matches found."))
-          : ListView.builder(
-              // Add +1 to the count to make room for the SizedBox
-              itemCount: _filteredList.length + 1,
-              padding: const EdgeInsets.all(12),
-              itemBuilder: (context, index) {
-                // Check if this is the extra item at the end
-                if (index == _filteredList.length) {
-                  return const SizedBox(height: 40);
-                }
-
-                final item = _filteredList[index];
-                final bool isIdiom =
-                    item['origin_table'] == DBHelper.tableIdioms;
-                final String displayName = isIdiom
-                    ? (item['idiom'] ?? "")
-                    : (item['word'] ?? "");
-                final String displaySub = isIdiom
-                    ? "Idiom"
-                    : (item['word_type'] ?? "");
-
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  elevation: 2,
-                  clipBehavior: Clip.antiAlias,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    onTap: () {
-                      Widget page = isIdiom
-                          ? IdiomDetailPage(item: item)
-                          : WordDetailPage(item: item);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => page),
-                      ).then((_) => _loadFavorites());
-                    },
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child:
-                          item['image_path'] != null && item['image_path'] != ""
-                          ? Image.file(
-                              File(item['image_path']),
-                              width: 60,
-                              height: 60,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              width: 60,
-                              height: 60,
-                              color: Colors.grey[200],
-                              child: Icon(isIdiom ? Icons.image : Icons.image),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _toggleSortOrder,
+                        icon: Icon(
+                          _isAscending
+                              ? Icons.arrow_upward
+                              : Icons.arrow_downward,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _isAscending ? 'Ascending' : 'Descending',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    // Add +1 to the count to make room for the SizedBox
+                    itemCount: _filteredList.length + 1,
+                    padding: const EdgeInsets.all(12),
+                    itemBuilder: (context, index) {
+                      // Check if this is the extra item at the end
+                      if (index == _filteredList.length) {
+                        return const SizedBox(height: 40);
+                      }
+
+                      final item = _filteredList[index];
+                      final bool isIdiom =
+                          item['origin_table'] == DBHelper.tableIdioms;
+                      final String displayName = isIdiom
+                          ? (item['idiom'] ?? "")
+                          : (item['word'] ?? "");
+                      final String displaySub = isIdiom
+                          ? "Idiom"
+                          : (item['word_type'] ?? "");
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          onTap: () {
+                            Widget page = isIdiom
+                                ? IdiomDetailPage(item: item)
+                                : WordDetailPage(item: item);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => page),
+                            ).then((_) => _loadFavorites());
+                          },
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child:
+                                item['image_path'] != null &&
+                                    item['image_path'] != ""
+                                ? Image.file(
+                                    File(item['image_path']),
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
+                                  )
+                                : Container(
+                                    width: 60,
+                                    height: 60,
+                                    color: Colors.grey[200],
+                                    child: Icon(
+                                      isIdiom ? Icons.image : Icons.image,
+                                    ),
+                                  ),
+                          ),
+                          title: Text(
+                            displayName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
                             ),
-                    ),
-                    title: Text(
-                      displayName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    subtitle: Text(
-                      displaySub,
-                      style: const TextStyle(
-                        fontStyle: FontStyle.italic,
-                        color: Colors.indigo,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(
-                        Icons.star,
-                        color: Colors.orange,
-                        size: 28,
-                      ),
-                      onPressed: () => _showRemoveModal(
-                        context,
-                        item['id'],
-                        displayName,
-                        item['origin_table'],
-                      ),
-                    ),
+                          ),
+                          subtitle: Text(
+                            displaySub,
+                            style: const TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.indigo,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(
+                              Icons.star,
+                              color: Colors.orange,
+                              size: 28,
+                            ),
+                            onPressed: () => _showRemoveModal(
+                              context,
+                              item['id'],
+                              displayName,
+                              item['origin_table'],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
     );
   }

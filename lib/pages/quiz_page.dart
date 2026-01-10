@@ -17,6 +17,7 @@ class _QuizPageState extends State<QuizPage> {
   List<Map<String, dynamic>> _vocabList = [];
   bool _isLoading = true;
   int? _flippedIndex; // This will track the absolute PageView index
+  bool _isIdiomMode = false; // practice mode: false = words, true = idioms
 
   // 1. Define a PageController
   PageController? _pageController;
@@ -73,11 +74,18 @@ class _QuizPageState extends State<QuizPage> {
   }
 
   void _loadData() async {
-    final data = await dbHelper.queryAll();
+    final prefs = await SharedPreferences.getInstance();
+    final practiceMode = prefs.getString('practice_mode') ?? 'vocab';
+    final bool isIdiomMode = practiceMode == 'idiom';
+
+    final data = await dbHelper.queryAll(
+      isIdiomMode ? DBHelper.tableIdioms : DBHelper.tableVocab,
+    );
     List<Map<String, dynamic>> shuffledList = List.from(data);
     shuffledList.shuffle(); // 2. Shuffle the list
 
     setState(() {
+      _isIdiomMode = isIdiomMode;
       _vocabList = shuffledList;
 
       // 3. Initialize controller at a high multiple of the list length
@@ -108,9 +116,13 @@ class _QuizPageState extends State<QuizPage> {
     }
 
     if (_vocabList.isEmpty) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
-          child: Text("No vocabulary found. Please add some first."),
+          child: Text(
+            _isIdiomMode
+                ? "No idioms found. Please add some first."
+                : "No vocabulary found. Please add some first.",
+          ),
         ),
       );
     }
@@ -197,21 +209,28 @@ class _QuizPageState extends State<QuizPage> {
       child: isFlipped
           ? _buildCardSide(
               key: const ValueKey(true),
-              content: item['word'] ?? "No word",
-              subContent: item['word_type'] != null && item['word_type'] != ""
-                  ? "(${item['word_type']})"
-                  : null,
-              color: Colors.indigo,
-              textColor: Colors.white,
+            content: _isIdiomMode
+              ? (item['idiom'] ?? "No idiom")
+              : (item['word'] ?? "No word"),
+            subContent: !_isIdiomMode &&
+                item['word_type'] != null &&
+                item['word_type'] != ""
+              ? "(${item['word_type']})"
+              : null,
+            color: Colors.indigo,
+            textColor: Colors.white,
+            isDescription: false,
             )
           : _buildCardSide(
               key: const ValueKey(false),
-              content: item['description'] != null && item['description'] != ""
-                  ? item['description']
-                  : "No description available.",
+            content:
+              item['description'] != null && item['description'] != ""
+                ? item['description']
+                : "No description available.",
               subContent: null,
               color: Colors.white,
               textColor: Colors.black87,
+              isDescription: true,
             ),
     );
   }
@@ -222,6 +241,7 @@ class _QuizPageState extends State<QuizPage> {
     String? subContent,
     required Color color,
     required Color textColor,
+    required bool isDescription,
   }) {
     return Container(
       key: key,
@@ -260,7 +280,8 @@ class _QuizPageState extends State<QuizPage> {
                     content,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 28,
+                      fontSize: isDescription ? 18 : 28,
+                      height: 1.4,
                       fontWeight: FontWeight.bold,
                       color: textColor,
                     ),

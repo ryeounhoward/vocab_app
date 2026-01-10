@@ -16,6 +16,7 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
 
   final dbHelper = DBHelper();
   bool _isLoading = true;
+  bool _isAscending = true; // sort order for list
   final TextEditingController _searchController = TextEditingController();
 
   // Keep track of keys for each item to control them from here
@@ -33,8 +34,9 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
     try {
       final data = await dbHelper.queryAll(DBHelper.tableIdioms);
       setState(() {
-        _allIdioms = data;
-        _filteredList = data;
+        // Make mutable copies of the read-only query result
+        _allIdioms = List<Map<String, dynamic>>.from(data);
+        _filteredList = List<Map<String, dynamic>>.from(_allIdioms);
       });
     } catch (e) {
       debugPrint("DATABASE ERROR: $e");
@@ -46,7 +48,8 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
   void _runFilter(String enteredKeyword) {
     List<Map<String, dynamic>> results = [];
     if (enteredKeyword.isEmpty) {
-      results = _allIdioms;
+      // Use a fresh mutable copy so sorting doesn't touch the original
+      results = List<Map<String, dynamic>>.from(_allIdioms);
     } else {
       results = _allIdioms
           .where(
@@ -56,7 +59,25 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
           )
           .toList();
     }
+    _applySort(results);
     setState(() => _filteredList = results);
+  }
+
+  void _applySort(List<Map<String, dynamic>> list) {
+    list.sort((a, b) {
+      final String aName = (a['idiom'] ?? '').toString().toLowerCase();
+      final String bName = (b['idiom'] ?? '').toString().toLowerCase();
+
+      final int cmp = aName.compareTo(bName);
+      return _isAscending ? cmp : -cmp;
+    });
+  }
+
+  void _toggleSortOrder() {
+    setState(() {
+      _isAscending = !_isAscending;
+      _runFilter(_searchController.text);
+    });
   }
 
   Future<void> _confirmDelete(
@@ -135,101 +156,140 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
           ? const Center(child: Text("No idioms found. Please add some first."))
           : _filteredList.isEmpty
           ? const Center(child: Text("No results found."))
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _filteredList.length + 1,
-              itemBuilder: (context, index) {
-                if (index == _filteredList.length) {
-                  return const SizedBox(height: 80); // Space after last card
-                }
-
-                final item = _filteredList[index];
-                final int itemId = item['id'];
-
-                // Retrieve or create a GlobalKey for this specific idiom ID
-                final titleKey = _titleKeys.putIfAbsent(
-                  itemId,
-                  () => GlobalKey<SlidingTitleState>(),
-                );
-
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  elevation: 2,
-                  clipBehavior: Clip.antiAlias,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    onTap: () {
-                      // 1. If another card is already scrolling, reset it first
-                      if (_activeKey != null && _activeKey != titleKey) {
-                        _activeKey?.currentState?.resetScroll();
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _toggleSortOrder,
+                        icon: Icon(
+                          _isAscending
+                              ? Icons.arrow_upward
+                              : Icons.arrow_downward,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _isAscending ? 'Ascending' : 'Descending',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: _filteredList.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == _filteredList.length) {
+                        return const SizedBox(
+                          height: 80,
+                        ); // Space after last card
                       }
 
-                      // 2. Toggle scroll on the current card (handles "click again to reset")
-                      titleKey.currentState?.toggleScroll();
+                      final item = _filteredList[index];
+                      final int itemId = item['id'];
 
-                      // 3. Update the active key reference
-                      _activeKey = titleKey;
-                    },
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child:
-                          item['image_path'] != null && item['image_path'] != ""
-                          ? Image.file(
-                              File(item['image_path']),
-                              width: 60,
-                              height: 60,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              width: 60,
-                              height: 60,
-                              color: Colors.grey[200],
-                              child: const Icon(
-                                Icons.image,
-                                color: Colors.grey,
-                              ),
-                            ),
-                    ),
-                    title: SlidingTitle(
-                      key: titleKey,
-                      text: item['idiom'] ?? "",
-                    ),
-                    subtitle: const Text(
-                      "Idiom",
-                      style: TextStyle(
-                        fontStyle: FontStyle.italic,
-                        color: Colors.indigo,
-                      ),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _navigateToForm(item),
+                      // Retrieve or create a GlobalKey for this specific idiom ID
+                      final titleKey = _titleKeys.putIfAbsent(
+                        itemId,
+                        () => GlobalKey<SlidingTitleState>(),
+                      );
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 2,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _confirmDelete(
-                            context,
-                            itemId,
-                            item['idiom'] ?? "this idiom",
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          onTap: () {
+                            // 1. If another card is already scrolling, reset it first
+                            if (_activeKey != null && _activeKey != titleKey) {
+                              _activeKey?.currentState?.resetScroll();
+                            }
+
+                            // 2. Toggle scroll on the current card (handles "click again to reset")
+                            titleKey.currentState?.toggleScroll();
+
+                            // 3. Update the active key reference
+                            _activeKey = titleKey;
+                          },
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child:
+                                item['image_path'] != null &&
+                                    item['image_path'] != ""
+                                ? Image.file(
+                                    File(item['image_path']),
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
+                                  )
+                                : Container(
+                                    width: 60,
+                                    height: 60,
+                                    color: Colors.grey[200],
+                                    child: const Icon(
+                                      Icons.image,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                          ),
+                          title: SlidingTitle(
+                            key: titleKey,
+                            text: item['idiom'] ?? "",
+                          ),
+                          subtitle: const Text(
+                            "Idiom",
+                            style: TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Colors.indigo,
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.blue,
+                                ),
+                                onPressed: () => _navigateToForm(item),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () => _confirmDelete(
+                                  context,
+                                  itemId,
+                                  item['idiom'] ?? "this idiom",
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.indigo,
