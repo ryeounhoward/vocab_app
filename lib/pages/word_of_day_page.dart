@@ -111,10 +111,11 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
     return Scaffold(
       appBar: AppBar(title: const Text("Word of the Day"), centerTitle: true),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         children: [
           // 1. ENABLE SWITCH
           ListTile(
+            contentPadding: EdgeInsets.zero,
             title: const Text("Enable Reminders"),
             subtitle: const Text("Get notifications for vocabulary"),
             trailing: Switch(
@@ -127,6 +128,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
 
           // 2. TIMELY SWITCH (NEW)
           ListTile(
+            contentPadding: EdgeInsets.zero,
             title: const Text("Align to Exact Hour"),
             subtitle: const Text("Notify at every top of the hour"),
             trailing: Switch(
@@ -139,6 +141,7 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
 
           // 3. ORDER MODE
           ListTile(
+            contentPadding: EdgeInsets.zero,
             title: const Text("Order Mode"),
             subtitle: Text(
               _isRandom ? "Random Words" : "Sequential (List Order)",
@@ -154,20 +157,31 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
           const Divider(),
           const ListTile(
             title: Text("Words per Notification"),
-            contentPadding: EdgeInsets.symmetric(horizontal: 16),
+            contentPadding: EdgeInsets.zero,
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: DropdownButton<int>(
-              isExpanded: true,
-              value: _wordCount,
-              items: List.generate(5, (index) => index + 1).map((int value) {
-                return DropdownMenuItem<int>(
-                  value: value,
-                  child: Text("$value ${value == 1 ? "Word" : "Words"}"),
-                );
-              }).toList(),
-              onChanged: (val) => setState(() => _wordCount = val!),
+            padding: EdgeInsets.zero,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: _wordCount,
+                  items: List.generate(5, (index) => index + 1).map((
+                    int value,
+                  ) {
+                    return DropdownMenuItem<int>(
+                      value: value,
+                      child: Text("$value ${value == 1 ? "Word" : "Words"}"),
+                    );
+                  }).toList(),
+                  onChanged: (val) => setState(() => _wordCount = val!),
+                ),
+              ),
             ),
           ),
 
@@ -175,38 +189,52 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
           const Divider(),
           const ListTile(
             title: Text("Remind me every:"),
-            contentPadding: EdgeInsets.symmetric(horizontal: 16),
+            contentPadding: EdgeInsets.zero,
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: DropdownButton<int>(
-              isExpanded: true,
-              value: _intervalHours,
-              items: List.generate(12, (index) => index + 1).map((int value) {
-                return DropdownMenuItem<int>(
-                  value: value,
-                  child: Text("$value ${value == 1 ? "Hour" : "Hours"}"),
-                );
-              }).toList(),
-              onChanged: (val) => setState(() => _intervalHours = val!),
+            padding: EdgeInsets.zero,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: _intervalHours,
+                  items: List.generate(12, (index) => index + 1).map((
+                    int value,
+                  ) {
+                    return DropdownMenuItem<int>(
+                      value: value,
+                      child: Text("$value ${value == 1 ? "Hour" : "Hours"}"),
+                    );
+                  }).toList(),
+                  onChanged: (val) => setState(() => _intervalHours = val!),
+                ),
+              ),
             ),
           ),
 
           const SizedBox(height: 40),
-          SizedBox(
-            height: 55,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigo,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+          Padding(
+            padding: EdgeInsets.zero,
+            child: SizedBox(
+              height: 55,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              ),
-              onPressed: _saveSettings,
-              child: const Text(
-                "SAVE SETTINGS",
-                style: TextStyle(fontWeight: FontWeight.bold),
+                onPressed: _saveSettings,
+                child: const Text(
+                  "SAVE SETTINGS",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ),

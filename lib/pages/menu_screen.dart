@@ -57,22 +57,22 @@ class MenuPage extends StatelessWidget {
                   ),
 
                   // 3. CONVERSATION CARD
-                  SizedBox(
-                    height: cardHeight,
-                    child: MenuCard(
-                      title: "Conversation",
-                      imagePath: "assets/images/conversation.jpg",
-                      color: Colors.greenAccent,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ConversationPage(),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+                  // SizedBox(
+                  //   height: cardHeight,
+                  //   child: MenuCard(
+                  //     title: "Conversation",
+                  //     imagePath: "assets/images/conversation.jpg",
+                  //     color: Colors.greenAccent,
+                  //     onTap: () {
+                  //       Navigator.push(
+                  //         context,
+                  //         MaterialPageRoute(
+                  //           builder: (context) => const ConversationPage(),
+                  //         ),
+                  //       );
+                  //     },
+                  //   ),
+                  // ),
                 ],
               ),
             );

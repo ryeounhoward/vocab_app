@@ -11,8 +11,11 @@ class QuizSettingsPage extends StatefulWidget {
 
 class _QuizSettingsPageState extends State<QuizSettingsPage> {
   final TextEditingController _countController = TextEditingController();
+
+  // State variables
   int _currentLimit = 10;
   bool _enableSound = true;
+  String _quizMode = 'desc_to_word'; // Default mode
 
   @override
   void initState() {
@@ -25,6 +28,8 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     setState(() {
       _currentLimit = prefs.getInt('quiz_total_items') ?? 10;
       _enableSound = prefs.getBool('quiz_sound_enabled') ?? true;
+      // Load quiz mode (defaulting to description -> word if not set)
+      _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
       _countController.text = _currentLimit.toString();
     });
   }
@@ -41,6 +46,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('quiz_total_items', newLimit);
     await prefs.setBool('quiz_sound_enabled', _enableSound);
+    await prefs.setString('quiz_mode', _quizMode); // Save the mode
 
     setState(() {
       _currentLimit = newLimit;
@@ -78,7 +84,61 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
           ),
           const Divider(height: 30),
 
-          // --- SECTION 2: COUNT ---
+          // --- SECTION 2: QUIZ MODE ---
+          const Text(
+            "Quiz Mode",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _quizMode,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'desc_to_word',
+                    child: Text("Definition to Word (Default)"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'word_to_desc',
+                    child: Text("Word to Definition"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'pic_to_word',
+                    child: Text("Picture to Word"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'mixed',
+                    child: Text("Word & Definition (Mixed)"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'mixed_with_pic',
+                    child: Text("Picture, Word & Definition (Mixed)"),
+                  ),
+                ],
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() => _quizMode = newValue);
+                  }
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            "Choose if you want to guess the word, the definition, or from a picture.",
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+
+          const Divider(height: 30),
+
+          // --- SECTION 3: COUNT ---
           const Text(
             "Question Count",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -100,7 +160,6 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              // REMOVED ICON
             ),
           ),
 
