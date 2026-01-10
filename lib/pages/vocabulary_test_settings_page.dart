@@ -15,6 +15,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
   // State variables
   int _currentLimit = 10;
   bool _enableSound = true;
+  bool _enableResultSound = true;
   String _quizMode = 'desc_to_word'; // Default mode
 
   @override
@@ -28,6 +29,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     setState(() {
       _currentLimit = prefs.getInt('quiz_total_items') ?? 10;
       _enableSound = prefs.getBool('quiz_sound_enabled') ?? true;
+      _enableResultSound = prefs.getBool('quiz_result_sound_enabled') ?? true;
       // Load quiz mode (defaulting to description -> word if not set)
       _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
       _countController.text = _currentLimit.toString();
@@ -46,6 +48,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('quiz_total_items', newLimit);
     await prefs.setBool('quiz_sound_enabled', _enableSound);
+    await prefs.setBool('quiz_result_sound_enabled', _enableResultSound);
     await prefs.setString('quiz_mode', _quizMode); // Save the mode
 
     setState(() {
@@ -80,6 +83,16 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             value: _enableSound,
             onChanged: (val) {
               setState(() => _enableSound = val);
+            },
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Enable Game Result Sound"),
+            subtitle: const Text("Play a sound at the end of each quiz"),
+            activeColor: Colors.indigo,
+            value: _enableResultSound,
+            onChanged: (val) {
+              setState(() => _enableResultSound = val);
             },
           ),
           const Divider(height: 30),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../database/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,6 +22,26 @@ class _QuizPageState extends State<QuizPage> {
   PageController? _pageController;
   // A large number to simulate infinity
   final int _loopSeparator = 10000;
+
+  // --- FLIP SOUND ---
+  Future<void> _playFlipSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Separate practice swoosh preference; default ON
+      final bool isSoundEnabled =
+          prefs.getBool('practice_swoosh_sound_enabled') ?? true;
+      if (!isSoundEnabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/swoosh.mp3'));
+
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint('Error playing flip sound: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -126,6 +147,8 @@ class _QuizPageState extends State<QuizPage> {
 
                   return GestureDetector(
                     onTap: () {
+                      final bool willShowAnswer = _flippedIndex != index;
+
                       setState(() {
                         flutterTts.stop();
                         if (_flippedIndex == index) {
@@ -134,6 +157,11 @@ class _QuizPageState extends State<QuizPage> {
                           _flippedIndex = index;
                         }
                       });
+
+                      // Play sound only when flipping to show the answer side
+                      if (willShowAnswer) {
+                        _playFlipSound();
+                      }
                     },
                     child: _buildFlipCard(item, isThisCardFlipped),
                   );
@@ -246,6 +274,7 @@ class _QuizPageState extends State<QuizPage> {
                         fontSize: 16,
                         fontWeight: FontWeight.w400,
                         fontStyle: FontStyle.italic,
+                        // ignore: deprecated_member_use
                         color: textColor.withOpacity(0.7),
                       ),
                     ),

@@ -6,6 +6,7 @@ import 'package:vocab_app/pages/manage_idioms_page.dart';
 import 'package:vocab_app/pages/vocabulary_test_settings_page.dart';
 import 'package:vocab_app/pages/word_of_day_page.dart';
 import 'voice_selection_page.dart';
+import 'practice_preferences_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -113,6 +114,20 @@ class SettingsPage extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const VoiceSelectionPage(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.style, color: Colors.indigo),
+            title: const Text("Practice Preferences"),
+            subtitle: const Text("Set your practice session preferences"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PracticePreferencesPage(),
                 ),
               );
             },

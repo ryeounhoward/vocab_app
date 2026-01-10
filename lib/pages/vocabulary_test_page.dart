@@ -110,6 +110,51 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
   }
 
+  // --- RESULT SOUND FUNCTION ---
+  Future<void> _playResultSound() async {
+    try {
+      // 1. Check settings for game result sound
+      final prefs = await SharedPreferences.getInstance();
+      bool isResultSoundEnabled =
+          prefs.getBool('quiz_result_sound_enabled') ?? true;
+      if (!isResultSoundEnabled) return;
+
+      if (_quizData.isEmpty) return;
+
+      // 2. Decide which sound to play based on final score percentage
+      final double percentage = _score / _quizData.length;
+
+      String soundPath;
+      if (percentage == 1.0) {
+        // GOOD JOB
+        soundPath = 'sounds/won.mp3';
+      } else if (percentage >= 0.9) {
+        // AMAZING
+        soundPath = 'sounds/won.mp3';
+      } else if (percentage >= 0.8) {
+        // VERY GOOD
+        soundPath = 'sounds/won.mp3';
+      } else if (percentage >= 0.7) {
+        // GOOD EFFORT
+        soundPath = 'sounds/loss.mp3';
+      } else {
+        // Below 70%: LOSS sound
+        soundPath = 'sounds/loss.mp3';
+      }
+
+      // 3. Use a temporary player for the result sound
+      final player = AudioPlayer();
+      await player.play(AssetSource(soundPath));
+
+      // 4. Dispose player after completion
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint("Error playing result sound: $e");
+    }
+  }
+
   Future<void> _generateQuiz() async {
     setState(() => _isLoading = true);
 
@@ -362,6 +407,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     Color feedbackColor = (_score / _quizData.length) >= 0.7
         ? Colors.green
         : Colors.red;
+
+    // Play game result sound based on final score
+    _playResultSound();
 
     showDialog(
       context: context,
