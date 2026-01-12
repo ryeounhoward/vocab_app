@@ -71,6 +71,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
     String type,
     String desc,
     List<String> examples,
+    String synonyms,
   ) async {
     String article = "a";
     if (type.isNotEmpty) {
@@ -90,13 +91,18 @@ class _WordDetailPageState extends State<WordDetailPage> {
           : " The examples are: ${examples.join(". ")}";
     }
 
+    String synonymsPart = "";
+    if (synonyms.trim().isNotEmpty) {
+      synonymsPart = " Its synonyms are: $synonyms.";
+    }
+
     // FIX 3: Force set the voice again right before speaking
     // This ensures the voice is correct even if the app was in background
     if (_currentVoice != null) {
       await flutterTts.setVoice(_currentVoice!);
     }
 
-    await flutterTts.speak("$meaningPart$exampleText");
+    await flutterTts.speak("$meaningPart$synonymsPart$exampleText");
   }
 
   void _toggleFav() async {
@@ -125,6 +131,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
         .split('\n')
         .where((String e) => e.trim().isNotEmpty)
         .toList();
+    String synonyms = (currentItem['synonyms'] as String? ?? '').trim();
 
     return Scaffold(
       appBar: AppBar(
@@ -228,6 +235,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                   currentItem['word_type'] ?? "",
                                   currentItem['description'] ?? "",
                                   examplesList,
+                                  synonyms,
                                 ),
                               ),
                             ],
@@ -246,7 +254,25 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                 "No description provided.",
                             style: const TextStyle(fontSize: 18, height: 1.4),
                           ),
-                          const SizedBox(height: 25),
+                          const SizedBox(height: 20),
+
+                          if (synonyms.isNotEmpty) ...[
+                            const Text(
+                              "Synonyms",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.indigo,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              synonyms,
+                              style: const TextStyle(fontSize: 16, height: 1.3),
+                            ),
+                            const SizedBox(height: 20),
+                          ],
+
+                          const SizedBox(height: 5),
                           if (examplesList.isNotEmpty) ...[
                             const Text(
                               "Examples",

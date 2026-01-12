@@ -18,7 +18,7 @@ class DBHelper {
     String path = join(await getDatabasesPath(), "vocab.db");
     return await openDatabase(
       path,
-      version: 5, // Version 5 ensures idioms table is created for old users
+      version: 6, // Version 6 adds synonyms column to vocabulary
       onCreate: (db, version) async {
         // Create Vocabulary Table
         await db.execute('''
@@ -29,6 +29,7 @@ class DBHelper {
           examples TEXT,
           word_type TEXT,
           image_path TEXT,
+          synonyms TEXT,
           is_favorite INTEGER DEFAULT 0
         )
         ''');
@@ -50,6 +51,9 @@ class DBHelper {
           await db.execute(
             "ALTER TABLE $tableVocab ADD COLUMN is_favorite INTEGER DEFAULT 0",
           );
+        }
+        if (oldVersion < 6) {
+          await db.execute("ALTER TABLE $tableVocab ADD COLUMN synonyms TEXT");
         }
         // Force creation of idioms table if it doesn't exist during upgrade
         if (oldVersion < 5) {

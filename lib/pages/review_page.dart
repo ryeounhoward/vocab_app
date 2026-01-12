@@ -113,7 +113,7 @@ class _ReviewPageState extends State<ReviewPage> {
       if (!enabled) return;
 
       final player = AudioPlayer();
-      await player.play(AssetSource('sounds/star.mp3'));
+      await player.play(AssetSource('sounds/star2.mp3'));
       player.onPlayerComplete.listen((event) {
         player.dispose();
       });
@@ -127,6 +127,7 @@ class _ReviewPageState extends State<ReviewPage> {
     String type,
     String desc,
     List<String> examples,
+    String synonyms,
   ) async {
     String article = "a";
     if (type.isNotEmpty) {
@@ -145,13 +146,18 @@ class _ReviewPageState extends State<ReviewPage> {
           : " The examples are: ${examples.join(". ")}";
     }
 
+    String synonymsPart = "";
+    if (synonyms.trim().isNotEmpty) {
+      synonymsPart = " Its synonyms are: $synonyms.";
+    }
+
     // FIX 3: Force set the voice again right before speaking
     // This prevents the OS from resetting to the default voice after inactivity
     if (_currentVoice != null) {
       await flutterTts.setVoice(_currentVoice!);
     }
 
-    await flutterTts.speak("$meaningPart$exampleText");
+    await flutterTts.speak("$meaningPart$synonymsPart$exampleText");
   }
 
   void _toggleFav(int indexInList, Map<String, dynamic> item) async {
@@ -216,7 +222,7 @@ class _ReviewPageState extends State<ReviewPage> {
         .split('\n')
         .where((String e) => e.trim().isNotEmpty)
         .toList();
-
+    String synonyms = (item['synonyms'] as String? ?? '').trim();
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -307,6 +313,7 @@ class _ReviewPageState extends State<ReviewPage> {
                             item['word_type'] ?? "",
                             item['description'] ?? "",
                             examplesList,
+                            synonyms,
                           ),
                         ),
                       ],
@@ -324,7 +331,25 @@ class _ReviewPageState extends State<ReviewPage> {
                       item['description'] ?? "No description provided.",
                       style: const TextStyle(fontSize: 18, height: 1.4),
                     ),
-                    const SizedBox(height: 25), // Spacing restored
+                    const SizedBox(height: 20),
+
+                    if (synonyms.isNotEmpty) ...[
+                      const Text(
+                        "Synonyms",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.indigo,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        synonyms,
+                        style: const TextStyle(fontSize: 16, height: 1.3),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
+                    const SizedBox(height: 5),
                     if (examplesList.isNotEmpty) ...[
                       const Text(
                         "Examples",

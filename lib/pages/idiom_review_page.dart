@@ -64,7 +64,7 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       if (!enabled) return;
 
       final player = AudioPlayer();
-      await player.play(AssetSource('sounds/star.mp3'));
+      await player.play(AssetSource('sounds/star2.mp3'));
       player.onPlayerComplete.listen((event) {
         player.dispose();
       });

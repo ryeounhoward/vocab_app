@@ -36,7 +36,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
   // Quiz mode state (aligned with settings page)
   String _quizMode =
-      'desc_to_word'; // vocab: desc_to_word, word_to_desc, mixed, pic_to_word, mixed_with_pic; idioms: idiom_desc_to_idiom, idiom_to_desc, idiom_mixed
+      'desc_to_word'; // vocab: desc_to_word, word_to_desc, word_to_synonym, synonym_to_word, mixed, pic_to_word, mixed_with_pic; idioms: idiom_desc_to_idiom, idiom_to_desc, idiom_mixed
   List<String> _questionModes = []; // per-question mode (for mixed)
 
   // Logic for the current question
@@ -66,6 +66,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   static int _cachedElapsedSeconds = 0;
   static int _cachedAnsweredCount = 0;
   static String? _cachedQuizMode;
+
+  static int _cachedHintPoints = 0;
+
+  int _hintPoints = 0;
+  String? _pictureHint;
 
   String _getFeedbackMessage() {
     if (_quizData.isEmpty) return "";
@@ -142,6 +147,23 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
   }
 
+  // --- HINT SOUND FUNCTION ---
+  Future<void> _playHintSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      bool isSoundEnabled = prefs.getBool('quiz_sound_enabled') ?? true;
+      if (!isSoundEnabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/star2.mp3'));
+      player.onPlayerComplete.listen((event) {
+        player.dispose();
+      });
+    } catch (e) {
+      debugPrint("Error playing hint sound: $e");
+    }
+  }
+
   // --- RESULT SOUND FUNCTION ---
   Future<void> _playResultSound() async {
     try {
@@ -214,6 +236,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _remainingSeconds = _cachedRemainingSeconds;
         _elapsedSeconds = _cachedElapsedSeconds;
         _answeredCount = _cachedAnsweredCount;
+        _hintPoints = _cachedHintPoints;
         _isLoading = false;
         // Recreate a start time based on elapsed seconds
         _quizStartTime = DateTime.now().subtract(
@@ -297,6 +320,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _quizMode == 'idiom_desc_to_idiom' ||
         _quizMode == 'idiom_to_desc' ||
         _quizMode == 'idiom_mixed';
+    final bool isSynonymQuiz =
+        _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
 
     final rawData = await dbHelper.queryAll(
       isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
@@ -315,6 +340,28 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _allWordsPool = allWords;
 
       if (allWords.isEmpty) {
+        setState(() {
+          _quizData = [];
+          _isLoading = false;
+        });
+        return;
+      }
+    } else if (isSynonymQuiz) {
+      // Only use words that actually have at least one synonym
+      allWords = allWords.where((w) {
+        final raw = (w['synonyms'] as String? ?? '').trim();
+        if (raw.isEmpty) return false;
+        final parts = raw
+            .split(RegExp(r'[\n,]'))
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        return parts.isNotEmpty;
+      }).toList();
+
+      _allWordsPool = allWords;
+
+      if (allWords.length < 4) {
         setState(() {
           _quizData = [];
           _isLoading = false;
@@ -389,6 +436,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _selectedAnswer = null;
       _answerController.clear();
       _isLoading = false;
+      _hintPoints = 0;
+      _pictureHint = null;
       _generateOptionsForCurrentQuestion(_allWordsPool);
       _quizStartTime = DateTime.now();
       _elapsedSeconds = 0;
@@ -450,6 +499,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _cachedRemainingSeconds = _remainingSeconds;
     _cachedElapsedSeconds = _elapsedSeconds;
     _cachedAnsweredCount = _answeredCount;
+    _cachedHintPoints = _hintPoints;
     _cachedQuizMode = _quizMode;
   }
 
@@ -469,6 +519,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     // For desc_to_word: question = description, options = words
     // For word_to_desc: question = word, options = descriptions
+    // For word_to_synonym: question = word, options = synonyms
     // For idiom_to_desc: question = idiom, options = meanings
     if (currentMode == 'word_to_desc' || currentMode == 'idiom_to_desc') {
       final String correctDescription =
@@ -489,6 +540,27 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       List<String> options = distractors.take(3).toList();
 
       options.add(correctDescription);
+      options.shuffle();
+
+      _currentOptions = options;
+    } else if (currentMode == 'word_to_synonym') {
+      // Options are synonyms; correct one is a random synonym of this word
+      final String correctSynonym = _getRandomSynonym(currentQuestion);
+
+      // Cache the chosen synonym so answer checking is stable
+      currentQuestion['_correctSynonym'] = correctSynonym;
+
+      List<String> distractors = pool
+          .where((w) => w['id'] != currentQuestion['id'])
+          .map(_getRandomSynonym)
+          .where((s) => s.trim().isNotEmpty && s != correctSynonym)
+          .toSet()
+          .toList();
+
+      distractors.shuffle();
+      List<String> options = distractors.take(3).toList();
+
+      options.add(correctSynonym);
       options.shuffle();
 
       _currentOptions = options;
@@ -525,6 +597,14 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     if (currentMode == 'word_to_desc' || currentMode == 'idiom_to_desc') {
       return (currentQuestion['description'] ?? 'No Description').toString();
+    } else if (currentMode == 'word_to_synonym') {
+      final dynamic stored = currentQuestion['_correctSynonym'];
+      if (stored is String && stored.isNotEmpty) {
+        return stored;
+      }
+
+      // Fallback (should be rare): compute one on the fly
+      return _getRandomSynonym(currentQuestion);
     } else {
       final String key = currentMode.startsWith('idiom') ? 'idiom' : 'word';
       return (currentQuestion[key] ?? '').toString();
@@ -551,6 +631,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _answeredCount++;
       if (isCorrect) {
         _score++;
+        _hintPoints++;
       }
     });
   }
@@ -576,6 +657,21 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     });
   }
 
+  String _getRandomSynonym(Map<String, dynamic> item) {
+    final raw = (item['synonyms'] as String? ?? '').trim();
+    if (raw.isEmpty) return '';
+
+    final parts = raw
+        .split(RegExp(r'[\n,]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (parts.isEmpty) return '';
+    parts.shuffle();
+    return parts.first;
+  }
+
   void _nextQuestion() {
     // Stop any ongoing TTS when moving to the next question
     flutterTts.stop();
@@ -587,6 +683,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _selectedAnswer = null;
         _generateOptionsForCurrentQuestion(_allWordsPool);
         _answerController.clear();
+        _pictureHint = null;
       });
     } else {
       // Finished all questions before timer expired
@@ -605,22 +702,60 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _showTimeUpDialog();
   }
 
+  void _usePictureHint() {
+    if (_quizData.isEmpty || _isAnswered || _hintPoints <= 0) {
+      return;
+    }
+
+    final currentQuestion = _quizData[_currentIndex];
+    final String hint = _getRandomSynonym(currentQuestion);
+
+    if (hint.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No synonym available for this word to use as a hint."),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _pictureHint = hint;
+      _hintPoints--;
+    });
+
+    _playHintSound();
+  }
+
   Future<void> _speakCurrentMeaning() async {
     if (_quizData.isEmpty) return;
 
     final currentQuestion = _quizData[_currentIndex];
     final String word = (currentQuestion['word'] ?? '').toString();
     final String desc = (currentQuestion['description'] ?? '').toString();
+    final String synonym = _getRandomSynonym(currentQuestion);
 
     if (_currentVoice != null) {
       await flutterTts.setVoice(_currentVoice!);
     }
 
-    if (desc.isNotEmpty) {
-      await flutterTts.speak('$word means $desc.');
-    } else {
+    if (desc.isEmpty && synonym.isEmpty) {
       await flutterTts.speak(word);
+      return;
     }
+
+    String sentence = '';
+    if (desc.isNotEmpty) {
+      sentence = '$word means $desc.';
+    } else {
+      sentence = word;
+    }
+
+    if (synonym.isNotEmpty) {
+      sentence += ' A synonym is $synonym.';
+    }
+
+    await flutterTts.speak(sentence);
   }
 
   void _showResultDialog() {
@@ -844,6 +979,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                           _quizMode == 'idiom_to_desc' ||
                           _quizMode == 'idiom_mixed')
                     ? "You need at least 4 idioms in your idiom list to start a quiz."
+                    : (_quizMode == 'word_to_synonym' ||
+                          _quizMode == 'synonym_to_word')
+                    ? "You need at least 4 words with synonyms in your vocabulary list to start this quiz."
                     : "You need at least 4 words in your vocabulary list to start a quiz.",
                 textAlign: TextAlign.center,
               ),
@@ -858,11 +996,33 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         ? _questionModes[_currentIndex]
         : _quizMode;
 
+    final bool isSynonymMode =
+        currentMode == 'word_to_synonym' || currentMode == 'synonym_to_word';
+    final bool showSynonymHint =
+        !currentMode.startsWith('idiom') &&
+        !isSynonymMode &&
+        currentMode != 'word_to_desc' &&
+        currentMode != 'desc_to_word';
+    final String randomSynonym = showSynonymHint
+        ? _getRandomSynonym(currentQuestion)
+        : '';
+
     String questionText;
     if (currentMode == 'word_to_desc') {
       questionText = (currentQuestion['word'] ?? 'No Word').toString();
     } else if (currentMode == 'idiom_to_desc') {
       questionText = (currentQuestion['idiom'] ?? 'No Idiom').toString();
+    } else if (currentMode == 'synonym_to_word') {
+      // Show one synonym as the question; cache it so it stays stable
+      String promptSynonym =
+          (currentQuestion['_promptSynonym'] as String? ?? '').trim();
+      if (promptSynonym.isEmpty) {
+        promptSynonym = _getRandomSynonym(currentQuestion);
+        currentQuestion['_promptSynonym'] = promptSynonym;
+      }
+      questionText = promptSynonym.isNotEmpty
+          ? promptSynonym
+          : 'No synonym available for this word.';
     } else {
       questionText = (currentQuestion['description'] ?? 'No Description')
           .toString();
@@ -958,6 +1118,47 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                     ),
                             ),
                           ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Hint points: $_hintPoints',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.blueGrey,
+                                      ),
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: !_isAnswered && _hintPoints > 0
+                                          ? _usePictureHint
+                                          : null,
+                                      icon: const Icon(
+                                        Icons.lightbulb_outline,
+                                        size: 18,
+                                      ),
+                                      label: const Text('HINT'),
+                                    ),
+                                  ],
+                                ),
+                                if (_pictureHint != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Hint: $_pictureHint',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.indigo,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                           if (_isAnswered) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -1021,6 +1222,16 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                     style: const TextStyle(
                                       fontSize: 16,
                                       height: 1.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    randomSynonym.isNotEmpty
+                                        ? 'Synonym: $randomSynonym'
+                                        : 'No synonym available for this word.',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.blueGrey,
                                     ),
                                   ),
                                 ],
@@ -1097,6 +1308,10 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                           Text(
                             currentMode == 'word_to_desc'
                                 ? 'WHAT DOES THIS WORD MEAN?'
+                                : currentMode == 'word_to_synonym'
+                                ? 'WHICH SYNONYM MATCHES THIS WORD?'
+                                : currentMode == 'synonym_to_word'
+                                ? 'WHICH WORD MATCHES THIS SYNONYM?'
                                 : currentMode == 'idiom_to_desc'
                                 ? 'WHAT DOES THIS IDIOM MEAN?'
                                 : currentMode == 'idiom_desc_to_idiom'
@@ -1119,6 +1334,21 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                               height: 1.4,
                             ),
                           ),
+                          if (showSynonymHint) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                randomSynonym.isNotEmpty
+                                    ? 'Synonym: $randomSynonym'
+                                    : 'No synonym available for this word.',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.blueGrey,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

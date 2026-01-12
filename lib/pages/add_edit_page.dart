@@ -20,6 +20,7 @@ class _AddEditPageState extends State<AddEditPage> {
 
   final TextEditingController _wordController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
+  final TextEditingController _synonymsController = TextEditingController();
   final TextEditingController _urlController = TextEditingController(); // New
 
   List<TextEditingController> _exampleControllers = [TextEditingController()];
@@ -48,6 +49,7 @@ class _AddEditPageState extends State<AddEditPage> {
     if (widget.vocabItem != null) {
       _wordController.text = widget.vocabItem!['word'] ?? "";
       _descController.text = widget.vocabItem!['description'] ?? "";
+      _synonymsController.text = widget.vocabItem!['synonyms'] ?? "";
       _wordType = widget.vocabItem!['word_type'];
       _imagePath = widget.vocabItem!['image_path'];
 
@@ -152,6 +154,7 @@ class _AddEditPageState extends State<AddEditPage> {
       final data = {
         'word': _wordController.text,
         'description': _descController.text,
+        'synonyms': _synonymsController.text.trim(),
         'examples': allExamples,
         'word_type': _wordType,
         'image_path': _imagePath,
@@ -310,6 +313,13 @@ class _AddEditPageState extends State<AddEditPage> {
                   controller: _descController,
                   maxLines: 4,
                   decoration: _inputStyle("Description"),
+                ),
+                const SizedBox(height: 15),
+
+                TextFormField(
+                  controller: _synonymsController,
+                  maxLines: 2,
+                  decoration: _inputStyle("Synonyms"),
                 ),
                 const SizedBox(height: 20),
 

@@ -174,6 +174,14 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
                     child: Text("Word to Definition"),
                   ),
                   DropdownMenuItem(
+                    value: 'word_to_synonym',
+                    child: Text("Word to Synonym"),
+                  ),
+                  DropdownMenuItem(
+                    value: 'synonym_to_word',
+                    child: Text("Synonym to Word"),
+                  ),
+                  DropdownMenuItem(
                     value: 'pic_to_word',
                     child: Text("Picture to Word"),
                   ),
@@ -209,7 +217,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
           ),
           const SizedBox(height: 5),
           const Text(
-            "Choose if you want to guess the word, the definition, or from a picture.",
+            "Choose if you want to guess the word, a synonym, the definition, or from a picture.",
             style: TextStyle(color: Colors.grey, fontSize: 12),
           ),
 

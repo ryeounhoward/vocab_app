@@ -34,7 +34,7 @@ class _QuizPageState extends State<QuizPage> {
       if (!isSoundEnabled) return;
 
       final player = AudioPlayer();
-      await player.play(AssetSource('sounds/swoosh.mp3'));
+      await player.play(AssetSource('sounds/swoosh2.mp3'));
 
       player.onPlayerComplete.listen((event) {
         player.dispose();
@@ -209,24 +209,24 @@ class _QuizPageState extends State<QuizPage> {
       child: isFlipped
           ? _buildCardSide(
               key: const ValueKey(true),
-            content: _isIdiomMode
-              ? (item['idiom'] ?? "No idiom")
-              : (item['word'] ?? "No word"),
-            subContent: !_isIdiomMode &&
-                item['word_type'] != null &&
-                item['word_type'] != ""
-              ? "(${item['word_type']})"
-              : null,
-            color: Colors.indigo,
-            textColor: Colors.white,
-            isDescription: false,
+              content: _isIdiomMode
+                  ? (item['idiom'] ?? "No idiom")
+                  : (item['word'] ?? "No word"),
+              subContent:
+                  !_isIdiomMode &&
+                      item['word_type'] != null &&
+                      item['word_type'] != ""
+                  ? "(${item['word_type']})"
+                  : null,
+              color: Colors.indigo,
+              textColor: Colors.white,
+              isDescription: false,
             )
           : _buildCardSide(
               key: const ValueKey(false),
-            content:
-              item['description'] != null && item['description'] != ""
-                ? item['description']
-                : "No description available.",
+              content: item['description'] != null && item['description'] != ""
+                  ? item['description']
+                  : "No description available.",
               subContent: null,
               color: Colors.white,
               textColor: Colors.black87,
