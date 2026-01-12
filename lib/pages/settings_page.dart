@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/favorite_page.dart';
 import 'package:vocab_app/pages/manage_data_page.dart';
 import 'package:vocab_app/pages/backup_restore_page.dart';
+import 'package:vocab_app/pages/about_page.dart';
 import 'package:vocab_app/pages/manage_idioms_page.dart';
 import 'package:vocab_app/pages/vocabulary_test_settings_page.dart';
 import 'package:vocab_app/pages/word_of_day_page.dart';
@@ -152,6 +153,18 @@ class SettingsPage extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (context) => const BackupRestorePage(),
                 ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.info, color: Colors.teal),
+            title: const Text("About"),
+            subtitle: const Text("App version, developer info, and more"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AboutPage()),
               );
             },
           ),

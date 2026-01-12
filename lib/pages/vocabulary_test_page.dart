@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// Note: Settings import removed since the button was removed
 import '../database/db_helper.dart';
 
 class VocabularyTestPage extends StatefulWidget {
@@ -22,6 +21,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   List<Map<String, dynamic>> _allWordsPool = [];
   int _currentIndex = 0;
   int _score = 0;
+
+  // In-memory caches to avoid re-querying the DB on every restart.
+  // (This removes the loading spinner in most restarts.)
+  List<Map<String, dynamic>>? _rawVocabCache;
+  List<Map<String, dynamic>>? _rawIdiomsCache;
 
   // Timer state
   bool _isCountdownTimerEnabled = false;
@@ -71,6 +75,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
   int _hintPoints = 0;
   String? _pictureHint;
+  List<String> _revealedHints = [];
 
   String _getFeedbackMessage() {
     if (_quizData.isEmpty) return "";
@@ -282,7 +287,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   }
 
   Future<void> _generateQuiz() async {
-    setState(() => _isLoading = true);
+    await _generateQuizInternal(forceReload: false);
+  }
+
+  Future<void> _generateQuizFresh() async {
+    await _generateQuizInternal(forceReload: true);
+  }
+
+  Future<void> _generateQuizInternal({required bool forceReload}) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Load quiz mode early so we know which table we need.
+    final String requestedMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+
+    final bool isIdiomQuiz =
+        requestedMode == 'idiom_desc_to_idiom' ||
+        requestedMode == 'idiom_to_desc' ||
+        requestedMode == 'idiom_mixed';
+
+    final bool willQueryDb =
+        forceReload ||
+        (isIdiomQuiz ? _rawIdiomsCache == null : _rawVocabCache == null);
+
+    if (willQueryDb) {
+      setState(() => _isLoading = true);
+    }
 
     // Reset any existing timer
     _timer?.cancel();
@@ -290,10 +319,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _answeredCount = 0;
     _elapsedSeconds = 0;
 
-    final prefs = await SharedPreferences.getInstance();
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
     // Load quiz mode and timer settings from preferences
-    _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+    _quizMode = requestedMode;
 
     bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
     bool duration = prefs.getBool('quiz_duration_timer_enabled') ?? !countdown;
@@ -316,18 +344,40 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     final dbHelper = DBHelper();
 
     // Decide which table to use based on quiz mode
-    final bool isIdiomQuiz =
-        _quizMode == 'idiom_desc_to_idiom' ||
-        _quizMode == 'idiom_to_desc' ||
-        _quizMode == 'idiom_mixed';
     final bool isSynonymQuiz =
         _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
 
-    final rawData = await dbHelper.queryAll(
-      isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
-    );
+    List<Map<String, dynamic>> rawData;
+    if (!forceReload) {
+      final cached = isIdiomQuiz ? _rawIdiomsCache : _rawVocabCache;
+      if (cached != null) {
+        rawData = cached
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: false);
+      } else {
+        rawData = await dbHelper.queryAll(
+          isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
+        );
+      }
+    } else {
+      rawData = await dbHelper.queryAll(
+        isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
+      );
+    }
 
-    List<Map<String, dynamic>> allWords = List.from(rawData);
+    // Store caches (deep copy) for fast restarts.
+    final stored = rawData
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+    if (isIdiomQuiz) {
+      _rawIdiomsCache = stored;
+    } else {
+      _rawVocabCache = stored;
+    }
+
+    List<Map<String, dynamic>> allWords = List<Map<String, dynamic>>.from(
+      rawData,
+    );
 
     if (_quizMode == 'pic_to_word') {
       allWords = allWords
@@ -347,21 +397,29 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         return;
       }
     } else if (isSynonymQuiz) {
-      // Only use words that actually have at least one synonym
-      allWords = allWords.where((w) {
-        final raw = (w['synonyms'] as String? ?? '').trim();
-        if (raw.isEmpty) return false;
-        final parts = raw
-            .split(RegExp(r'[\n,]'))
-            .map((s) => s.trim())
-            .where((s) => s.isNotEmpty)
-            .toList();
-        return parts.isNotEmpty;
+      // For synonym quiz modes:
+      // - Questions must have a real word + at least one parsed synonym.
+      // - Options pool can include all vocab words (even without synonyms)
+      //   so synonym_to_word has enough distractor words.
+      final List<Map<String, dynamic>> optionsPool = allWords.where((w) {
+        final String word = (w['word'] ?? '').toString().trim();
+        return word.isNotEmpty;
       }).toList();
 
-      _allWordsPool = allWords;
+      // Only use words that actually have at least one synonym as QUESTIONS.
+      final List<Map<String, dynamic>> synonymQuestions = allWords.where((w) {
+        final String word = (w['word'] ?? '').toString().trim();
+        if (word.isEmpty) return false;
+        return _parseSynonyms(w['synonyms']).isNotEmpty;
+      }).toList();
 
-      if (allWords.length < 4) {
+      // Use the broad pool for options, but questions only from synonym words.
+      _allWordsPool = optionsPool;
+      allWords = synonymQuestions;
+
+      // We can still run a quiz with fewer than 4 synonym-words; the options
+      // list will just be smaller if there aren't enough distractors.
+      if (allWords.isEmpty) {
         setState(() {
           _quizData = [];
           _isLoading = false;
@@ -394,7 +452,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       finalQuestions.shuffle();
     }
 
-    _quizData = finalQuestions;
+    _quizData = finalQuestions
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
     // Build per-question modes (for mixed / fixed modes)
     _questionModes = List<String>.generate(_quizData.length, (index) {
       final question = _quizData[index];
@@ -438,6 +498,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _isLoading = false;
       _hintPoints = 0;
       _pictureHint = null;
+      _revealedHints = [];
       _generateOptionsForCurrentQuestion(_allWordsPool);
       _quizStartTime = DateTime.now();
       _elapsedSeconds = 0;
@@ -547,12 +608,21 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       // Options are synonyms; correct one is a random synonym of this word
       final String correctSynonym = _getRandomSynonym(currentQuestion);
 
+      // If we somehow failed to parse a synonym, don't show a blank screen.
+      if (correctSynonym.trim().isEmpty) {
+        _currentOptions = [];
+        return;
+      }
+
       // Cache the chosen synonym so answer checking is stable
       currentQuestion['_correctSynonym'] = correctSynonym;
 
+      // Gather distractor synonyms from ALL other words (not just one random
+      // synonym per word). This makes the mode work even when only a few
+      // words have synonyms.
       List<String> distractors = pool
           .where((w) => w['id'] != currentQuestion['id'])
-          .map(_getRandomSynonym)
+          .expand((w) => _parseSynonyms(w['synonyms']))
           .where((s) => s.trim().isNotEmpty && s != correctSynonym)
           .toSet()
           .toList();
@@ -585,6 +655,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
       _currentOptions = options;
     }
+
+    // Final safety net: never leave the UI with an empty options list
+    // (it looks like a blank page). We'll keep it empty and show a message.
   }
 
   String _getCorrectAnswerForCurrentQuestion() {
@@ -651,22 +724,35 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
       if (isCorrect) {
         _score++;
+        _hintPoints++;
       }
 
       _answeredCount++;
     });
   }
 
-  String _getRandomSynonym(Map<String, dynamic> item) {
-    final raw = (item['synonyms'] as String? ?? '').trim();
-    if (raw.isEmpty) return '';
+  List<String> _parseSynonyms(dynamic rawValue) {
+    final raw = (rawValue as String? ?? '').trim();
+    if (raw.isEmpty) return const [];
 
+    // Accept common separators: comma and new line.
+    // (If you later want ';' or '|', add them here.)
     final parts = raw
         .split(RegExp(r'[\n,]'))
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
 
+    if (parts.isEmpty) return const [];
+    return parts.toSet().toList();
+  }
+
+  List<String> _getAllSynonyms(Map<String, dynamic> item) {
+    return _parseSynonyms(item['synonyms']);
+  }
+
+  String _getRandomSynonym(Map<String, dynamic> item) {
+    final parts = _parseSynonyms(item['synonyms']);
     if (parts.isEmpty) return '';
     parts.shuffle();
     return parts.first;
@@ -684,6 +770,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _generateOptionsForCurrentQuestion(_allWordsPool);
         _answerController.clear();
         _pictureHint = null;
+        _revealedHints = [];
       });
     } else {
       // Finished all questions before timer expired
@@ -708,9 +795,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
 
     final currentQuestion = _quizData[_currentIndex];
-    final String hint = _getRandomSynonym(currentQuestion);
+    final List<String> synonyms = _getAllSynonyms(currentQuestion);
+    final List<String> unusedHints = synonyms
+        .where((syn) => !_revealedHints.contains(syn))
+        .toList(growable: false);
 
-    if (hint.isEmpty) {
+    if (synonyms.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("No synonym available for this word to use as a hint."),
@@ -719,7 +809,20 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       return;
     }
 
+    if (unusedHints.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("All hints for this word have been revealed."),
+        ),
+      );
+      return;
+    }
+
+    unusedHints.shuffle();
+    final String hint = unusedHints.first;
+
     setState(() {
+      _revealedHints = [..._revealedHints, hint];
       _pictureHint = hint;
       _hintPoints--;
     });
@@ -853,7 +956,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _generateQuiz();
+              _generateQuizFresh();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.indigo,
@@ -914,7 +1017,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _generateQuiz();
+              _generateQuizFresh();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.indigo,
@@ -981,7 +1084,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                     ? "You need at least 4 idioms in your idiom list to start a quiz."
                     : (_quizMode == 'word_to_synonym' ||
                           _quizMode == 'synonym_to_word')
-                    ? "You need at least 4 words with synonyms in your vocabulary list to start this quiz."
+                    ? "You need at least 1 word with synonyms in your vocabulary list to start this quiz."
                     : "You need at least 4 words in your vocabulary list to start a quiz.",
                 textAlign: TextAlign.center,
               ),
@@ -998,20 +1101,18 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     final bool isSynonymMode =
         currentMode == 'word_to_synonym' || currentMode == 'synonym_to_word';
-    final bool showSynonymHint =
-        !currentMode.startsWith('idiom') &&
-        !isSynonymMode &&
-        currentMode != 'word_to_desc' &&
-        currentMode != 'desc_to_word';
-    final String randomSynonym = showSynonymHint
-        ? _getRandomSynonym(currentQuestion)
-        : '';
+    final List<String> allSynonyms = _getAllSynonyms(currentQuestion);
+    final bool canUseHint =
+        !_isAnswered && _hintPoints > 0 && allSynonyms.isNotEmpty;
 
     String questionText;
     if (currentMode == 'word_to_desc') {
       questionText = (currentQuestion['word'] ?? 'No Word').toString();
     } else if (currentMode == 'idiom_to_desc') {
       questionText = (currentQuestion['idiom'] ?? 'No Idiom').toString();
+    } else if (currentMode == 'word_to_synonym') {
+      // In this mode the prompt should be the word itself.
+      questionText = (currentQuestion['word'] ?? 'No Word').toString();
     } else if (currentMode == 'synonym_to_word') {
       // Show one synonym as the question; cache it so it stays stable
       String promptSynonym =
@@ -1118,47 +1219,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                     ),
                             ),
                           ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'Hint points: $_hintPoints',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.blueGrey,
-                                      ),
-                                    ),
-                                    TextButton.icon(
-                                      onPressed: !_isAnswered && _hintPoints > 0
-                                          ? _usePictureHint
-                                          : null,
-                                      icon: const Icon(
-                                        Icons.lightbulb_outline,
-                                        size: 18,
-                                      ),
-                                      label: const Text('HINT'),
-                                    ),
-                                  ],
-                                ),
-                                if (_pictureHint != null) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Hint: $_pictureHint',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.indigo,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
+                          const SizedBox(height: 12),
                           if (_isAnswered) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -1226,8 +1287,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    randomSynonym.isNotEmpty
-                                        ? 'Synonym: $randomSynonym'
+                                    allSynonyms.isNotEmpty
+                                        ? 'Synonyms: ${allSynonyms.join(', ')}'
                                         : 'No synonym available for this word.',
                                     style: const TextStyle(
                                       fontSize: 14,
@@ -1242,6 +1303,28 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Text('Hint points: $_hintPoints'),
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.lightbulb_outline),
+                          label: const Text('GET HINT'),
+                          onPressed: canUseHint ? _usePictureHint : null,
+                        ),
+                      ],
+                    ),
+                    if (_revealedHints.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Hints: ${_revealedHints.join(', ')}',
+                          style: const TextStyle(color: Colors.indigo),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _answerController,
                       textInputAction: TextInputAction.done,
@@ -1334,21 +1417,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                               height: 1.4,
                             ),
                           ),
-                          if (showSynonymHint) ...[
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                randomSynonym.isNotEmpty
-                                    ? 'Synonym: $randomSynonym'
-                                    : 'No synonym available for this word.',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.blueGrey,
-                                ),
-                              ),
-                            ),
-                          ],
+                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
@@ -1367,16 +1436,54 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                     ),
                     const SizedBox(height: 10),
 
-                    ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _currentOptions.length,
-                      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-                      itemBuilder: (ctx, i) {
-                        final option = _currentOptions[i];
-                        return _buildOptionButton(option, correctAnswer);
-                      },
-                    ),
+                    if (_currentOptions.isEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          border: Border.all(color: Colors.amber.shade200),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'No options could be generated for this question.',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Tip: make sure the Synonyms field is like: Word 1, Word 2, Word 3',
+                              style: TextStyle(color: Colors.black87),
+                            ),
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _generateOptionsForCurrentQuestion(
+                                    _allWordsPool,
+                                  );
+                                });
+                              },
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('RELOAD OPTIONS'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _currentOptions.length,
+                        separatorBuilder: (ctx, i) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (ctx, i) {
+                          final option = _currentOptions[i];
+                          return _buildOptionButton(option, correctAnswer);
+                        },
+                      ),
                   ],
                 ),
               ),
@@ -1482,7 +1589,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
             onPressed: () {
               Navigator.of(ctx).pop();
               _timer?.cancel();
-              _generateQuiz();
+              _generateQuizFresh();
             },
             child: const Text('Restart', style: TextStyle(color: Colors.red)),
           ),

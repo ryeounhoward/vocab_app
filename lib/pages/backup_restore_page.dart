@@ -266,6 +266,8 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       );
 
       if (result != null && result.files.single.path != null) {
+        await _showLoadingDialog("Reading ZIP backup (data + photos)...");
+
         File zipFile = File(result.files.single.path!);
         Uint8List bytes = await zipFile.readAsBytes();
         Archive archive = ZipDecoder().decodeBytes(bytes);
@@ -273,6 +275,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         // Find and decode the JSON data
         ArchiveFile? jsonFile = archive.findFile('data/backup.json');
         if (jsonFile == null) {
+          _hideLoadingDialog();
           _showSnackBar("Invalid Zip: backup.json missing");
           return;
         }
@@ -292,6 +295,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             }
           }
         }
+
+        // Done with heavy file work; hide the reading dialog before confirm.
+        _hideLoadingDialog();
 
         // Use the common import handler
         List<dynamic> vocabToProcess = jsonData['vocabulary'] ?? [];
