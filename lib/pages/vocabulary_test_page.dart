@@ -76,6 +76,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   int _hintPoints = 0;
   String? _pictureHint;
   List<String> _revealedHints = [];
+  String? _emptyReason; // tracks why the quiz has no data
 
   String _getFeedbackMessage() {
     if (_quizData.isEmpty) return "";
@@ -318,6 +319,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _timeOver = false;
     _answeredCount = 0;
     _elapsedSeconds = 0;
+    _emptyReason = null;
 
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
     // Load quiz mode and timer settings from preferences
@@ -363,6 +365,77 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       rawData = await dbHelper.queryAll(
         isIdiomQuiz ? DBHelper.tableIdioms : DBHelper.tableVocab,
       );
+    }
+
+    // Apply selected-words / selected-idioms filters
+    if (!isIdiomQuiz) {
+      final bool useAll = prefs.getBool('quiz_use_all_words') ?? true;
+      if (!useAll) {
+        final List<String> selectedIdsStr =
+            prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
+        final Set<int> selectedIds = selectedIdsStr
+            .map((s) => int.tryParse(s))
+            .whereType<int>()
+            .toSet();
+
+        // If user turned off "use all" but did not select anything,
+        // treat as "no data" instead of falling back to all words.
+        if (selectedIds.isEmpty) {
+          setState(() {
+            _quizData = [];
+            _isLoading = false;
+            _emptyReason = 'no_words_selected';
+          });
+          return;
+        }
+
+        rawData = rawData
+            .where((item) {
+              final dynamic id = item['id'];
+              if (id is int) {
+                return selectedIds.contains(id);
+              }
+              if (id is String) {
+                final parsed = int.tryParse(id);
+                return parsed != null && selectedIds.contains(parsed);
+              }
+              return false;
+            })
+            .toList(growable: false);
+      }
+    } else {
+      final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+      if (!useAllIdioms) {
+        final List<String> selectedIdsStr =
+            prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
+        final Set<int> selectedIds = selectedIdsStr
+            .map((s) => int.tryParse(s))
+            .whereType<int>()
+            .toSet();
+
+        if (selectedIds.isEmpty) {
+          setState(() {
+            _quizData = [];
+            _isLoading = false;
+            _emptyReason = 'no_idioms_selected';
+          });
+          return;
+        }
+
+        rawData = rawData
+            .where((item) {
+              final dynamic id = item['id'];
+              if (id is int) {
+                return selectedIds.contains(id);
+              }
+              if (id is String) {
+                final parsed = int.tryParse(id);
+                return parsed != null && selectedIds.contains(parsed);
+              }
+              return false;
+            })
+            .toList(growable: false);
+      }
     }
 
     // Store caches (deep copy) for fast restarts.
@@ -1069,26 +1142,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
 
     if (_quizData.isEmpty) {
+      String message;
+      if (_emptyReason == 'no_words_selected') {
+        message =
+            "No words are selected for quizzes. Please go to Settings → Sort Data Preferences → Sort Words Data and choose some words, or turn on 'Use all words'.";
+      } else if (_emptyReason == 'no_idioms_selected') {
+        message =
+            "No idioms are selected for quizzes. Please go to Settings → Sort Data Preferences → Sort Idioms Data and choose some idioms, or turn on 'Use all idioms'.";
+      } else {
+        message = _quizMode == 'pic_to_word'
+            ? "Add images to your vocabulary words to play this mode."
+            : (_quizMode == 'idiom_desc_to_idiom' ||
+                  _quizMode == 'idiom_to_desc' ||
+                  _quizMode == 'idiom_mixed')
+            ? "You need at least 4 idioms in your idiom list to start a quiz."
+            : (_quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word')
+            ? "You need at least 1 word with synonyms in your vocabulary list to start this quiz."
+            : "You need at least 4 words in your vocabulary list to start a quiz.";
+      }
+
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _quizMode == 'pic_to_word'
-                    ? "Add images to your vocabulary words to play this mode."
-                    : (_quizMode == 'idiom_desc_to_idiom' ||
-                          _quizMode == 'idiom_to_desc' ||
-                          _quizMode == 'idiom_mixed')
-                    ? "You need at least 4 idioms in your idiom list to start a quiz."
-                    : (_quizMode == 'word_to_synonym' ||
-                          _quizMode == 'synonym_to_word')
-                    ? "You need at least 1 word with synonyms in your vocabulary list to start this quiz."
-                    : "You need at least 4 words in your vocabulary list to start a quiz.",
-                textAlign: TextAlign.center,
-              ),
-            ],
+            children: [Text(message, textAlign: TextAlign.center)],
           ),
         ),
       );

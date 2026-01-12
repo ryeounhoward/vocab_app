@@ -8,6 +8,7 @@ import 'package:vocab_app/pages/vocabulary_test_settings_page.dart';
 import 'package:vocab_app/pages/word_of_day_page.dart';
 import 'voice_selection_page.dart';
 import 'practice_preferences_page.dart';
+import 'sort_data_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -119,6 +120,29 @@ class SettingsPage extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text("Practice Preferences Saved!"),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.style, color: Colors.indigo),
+            title: const Text("Sort Data Preferences"),
+            subtitle: const Text(
+              "Choose data to practice, review, and quiz based on your preferences",
+            ),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SortDataPage()),
+              );
+
+              if (result == true && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Sort Data Preferences Saved!"),
                     duration: Duration(seconds: 2),
                   ),
                 );
