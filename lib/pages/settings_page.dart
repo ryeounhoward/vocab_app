@@ -57,6 +57,20 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.sort, color: Colors.indigo),
+            title: const Text("Manage Sort Data"),
+            subtitle: const Text(
+              "Choose data to practice, review, and quiz based on your preferences",
+            ),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () async {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SortDataPage()),
+              );
+            },
+          ),
 
           ListTile(
             leading: const Icon(
@@ -120,29 +134,6 @@ class SettingsPage extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text("Practice Preferences Saved!"),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.style, color: Colors.indigo),
-            title: const Text("Sort Data Preferences"),
-            subtitle: const Text(
-              "Choose data to practice, review, and quiz based on your preferences",
-            ),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () async {
-              final result = await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SortDataPage()),
-              );
-
-              if (result == true && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Sort Data Preferences Saved!"),
                     duration: Duration(seconds: 2),
                   ),
                 );

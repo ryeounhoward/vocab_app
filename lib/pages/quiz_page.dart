@@ -81,7 +81,52 @@ class _QuizPageState extends State<QuizPage> {
     final data = await dbHelper.queryAll(
       isIdiomMode ? DBHelper.tableIdioms : DBHelper.tableVocab,
     );
-    List<Map<String, dynamic>> shuffledList = List.from(data);
+
+    // For vocabulary and idiom modes, respect the selected subsets from
+    // SortWordsDataPage and SortIdiomsDataPage, respectively.
+    // If "use all" is OFF and nothing is selected, use an empty list.
+    List<Map<String, dynamic>> filteredData;
+    if (!isIdiomMode) {
+      // Vocabulary subset
+      final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
+      final List<String> storedIds =
+          prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
+      final Set<int> selectedIds = storedIds
+          .map((s) => int.tryParse(s))
+          .whereType<int>()
+          .toSet();
+
+      if (useAllWords) {
+        filteredData = List<Map<String, dynamic>>.from(data);
+      } else if (selectedIds.isNotEmpty) {
+        filteredData = data
+            .where((item) => selectedIds.contains(item['id'] as int? ?? -1))
+            .toList();
+      } else {
+        filteredData = <Map<String, dynamic>>[];
+      }
+    } else {
+      // Idiom subset
+      final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+      final List<String> storedIds =
+          prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
+      final Set<int> selectedIds = storedIds
+          .map((s) => int.tryParse(s))
+          .whereType<int>()
+          .toSet();
+
+      if (useAllIdioms) {
+        filteredData = List<Map<String, dynamic>>.from(data);
+      } else if (selectedIds.isNotEmpty) {
+        filteredData = data
+            .where((item) => selectedIds.contains(item['id'] as int? ?? -1))
+            .toList();
+      } else {
+        filteredData = <Map<String, dynamic>>[];
+      }
+    }
+
+    List<Map<String, dynamic>> shuffledList = List.from(filteredData);
     shuffledList.shuffle(); // 2. Shuffle the list
 
     setState(() {

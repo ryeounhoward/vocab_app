@@ -31,7 +31,12 @@ class SortDataPage extends StatelessWidget {
               );
 
               if (result == true && context.mounted) {
-                Navigator.pop(context, true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Word sort settings saved!'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
               }
             },
           ),
@@ -51,7 +56,12 @@ class SortDataPage extends StatelessWidget {
               );
 
               if (result == true && context.mounted) {
-                Navigator.pop(context, true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Idiom sort settings saved!'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
               }
             },
           ),

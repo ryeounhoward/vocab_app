@@ -79,12 +79,34 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
 
     final data = await dbHelper.queryAll(DBHelper.tableIdioms);
 
-    // Read preferred order from settings
+    // Read preferences for which idioms to include
     final prefs = await SharedPreferences.getInstance();
+    final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+    final List<String> storedIds =
+        prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
+    final Set<int> selectedIds = storedIds
+        .map((s) => int.tryParse(s))
+        .whereType<int>()
+        .toSet();
+
+    // Apply inclusion filter (if user chose specific idioms).
+    // If "use all" is OFF and nothing is selected, return an empty list.
+    List<Map<String, dynamic>> filteredData;
+    if (useAllIdioms) {
+      filteredData = List<Map<String, dynamic>>.from(data);
+    } else if (selectedIds.isNotEmpty) {
+      filteredData = data
+          .where((item) => selectedIds.contains(item['id'] as int? ?? -1))
+          .toList();
+    } else {
+      filteredData = <Map<String, dynamic>>[];
+    }
+
+    // Read preferred order from settings
     final order = prefs.getString('practice_order') ?? 'shuffle';
 
     // Start from a mutable copy
-    List<Map<String, dynamic>> orderedData = List.from(data);
+    List<Map<String, dynamic>> orderedData = List.from(filteredData);
 
     if (order == 'az') {
       orderedData.sort((a, b) {
