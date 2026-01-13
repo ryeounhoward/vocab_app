@@ -20,6 +20,8 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
   final Set<int> _selectedIds = {};
   bool _isAscending = true;
   final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _idiomGroups = [];
+  int? _selectedGroupId;
 
   @override
   void initState() {
@@ -38,20 +40,57 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
         .whereType<int>()
         .toSet();
 
+    final int? storedGroupId = prefs.getInt('quiz_selected_idiom_group_id');
+
     final data = await _dbHelper.queryAll(DBHelper.tableIdioms);
+    final List<Map<String, dynamic>> groups = await _dbHelper
+        .getAllIdiomGroups();
+
+    List<Map<String, dynamic>> visibleIdioms = List<Map<String, dynamic>>.from(
+      data,
+    );
+
+    int? effectiveGroupId;
+    if (!useAll && storedGroupId != null) {
+      final bool groupExists = groups.any(
+        (g) => (g['id'] as int?) != null && g['id'] == storedGroupId,
+      );
+      if (groupExists) {
+        final Set<int> idiomIds = await _dbHelper.getIdiomIdsForGroup(
+          storedGroupId,
+        );
+        visibleIdioms = visibleIdioms
+            .where((item) => idiomIds.contains(item['id'] as int? ?? -1))
+            .toList();
+        effectiveGroupId = storedGroupId;
+      }
+    }
+
+    // Determine selected IDs: if a group is active, treat all idioms
+    // in that group as selected; otherwise fall back to stored IDs.
+    final Set<int> computedSelectedIds = <int>{};
+    if (!useAll && effectiveGroupId != null) {
+      computedSelectedIds.addAll(
+        visibleIdioms.map((e) => e['id']).whereType<int>(),
+      );
+    } else {
+      computedSelectedIds.addAll(
+        visibleIdioms
+            .map((e) => e['id'])
+            .whereType<int>()
+            .where((id) => selectedFromPrefs.contains(id)),
+      );
+    }
 
     setState(() {
       _useAllIdioms = useAll;
-      _allIdioms = List<Map<String, dynamic>>.from(data);
+      _allIdioms = visibleIdioms;
       _filteredIdioms = List<Map<String, dynamic>>.from(_allIdioms);
       _selectedIds
         ..clear()
-        ..addAll(
-          _allIdioms
-              .map((e) => e['id'])
-              .whereType<int>()
-              .where((id) => selectedFromPrefs.contains(id)),
-        );
+        ..addAll(computedSelectedIds);
+      _idiomGroups = List<Map<String, dynamic>>.from(groups);
+      _selectedGroupId = effectiveGroupId;
       _isLoading = false;
     });
 
@@ -103,6 +142,40 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
     });
   }
 
+  Future<void> _onGroupChanged(int? groupId) async {
+    if (groupId == _selectedGroupId) return;
+
+    final data = await _dbHelper.queryAll(DBHelper.tableIdioms);
+    List<Map<String, dynamic>> visibleIdioms = List<Map<String, dynamic>>.from(
+      data,
+    );
+
+    if (groupId != null) {
+      final Set<int> idiomIds = await _dbHelper.getIdiomIdsForGroup(groupId);
+      visibleIdioms = visibleIdioms
+          .where((item) => idiomIds.contains(item['id'] as int? ?? -1))
+          .toList();
+
+      _useAllIdioms = false;
+    }
+
+    final Set<int> allowedIds = visibleIdioms
+        .map((e) => e['id'])
+        .whereType<int>()
+        .toSet();
+
+    setState(() {
+      _selectedGroupId = groupId;
+      _allIdioms = visibleIdioms;
+      _filteredIdioms = List<Map<String, dynamic>>.from(_allIdioms);
+      _selectedIds
+        ..clear()
+        ..addAll(allowedIds);
+    });
+
+    _applySort();
+  }
+
   void _toggleItem(int id, bool? checked) {
     setState(() {
       if (checked == true) {
@@ -130,13 +203,27 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
 
     await prefs.setBool('quiz_use_all_idioms', _useAllIdioms);
 
-    if (_useAllIdioms || _selectedIds.isEmpty) {
+    if (_useAllIdioms || (_selectedGroupId == null && _selectedIds.isEmpty)) {
       await prefs.remove('quiz_selected_idiom_ids');
+      await prefs.remove('quiz_selected_idiom_group_id');
     } else {
+      // If a group is selected, always use that group's idioms as the
+      // selection for displaying data.
+      Set<int> finalIds = _selectedIds;
+      if (_selectedGroupId != null) {
+        finalIds = await _dbHelper.getIdiomIdsForGroup(_selectedGroupId!);
+      }
+
       await prefs.setStringList(
         'quiz_selected_idiom_ids',
-        _selectedIds.map((id) => id.toString()).toList(),
+        finalIds.map((id) => id.toString()).toList(),
       );
+
+      if (_selectedGroupId != null) {
+        await prefs.setInt('quiz_selected_idiom_group_id', _selectedGroupId!);
+      } else {
+        await prefs.remove('quiz_selected_idiom_group_id');
+      }
     }
 
     if (!mounted) return;
@@ -161,6 +248,39 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 12),
+                  if (!_useAllIdioms && _idiomGroups.isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Filter by idiom group (optional)',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        DropdownButtonFormField<int?>(
+                          value: _selectedGroupId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                          ),
+                          hint: const Text('All idioms (no group filter)'),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('All idioms (no group filter)'),
+                            ),
+                            ..._idiomGroups.map(
+                              (g) => DropdownMenuItem<int?>(
+                                value: g['id'] as int?,
+                                child: Text((g['name'] ?? '').toString()),
+                              ),
+                            ),
+                          ],
+                          onChanged: _onGroupChanged,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
                   TextField(
                     controller: _searchController,
                     onChanged: _runFilter,
@@ -208,7 +328,9 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
                                   ? true
                                   : (_hasAnySelected ? null : false),
                               tristate: true,
-                              onChanged: _toggleSelectAll,
+                              onChanged: _selectedGroupId != null
+                                  ? null
+                                  : _toggleSelectAll,
                             ),
                             const Text('Select all'),
                           ],
@@ -279,8 +401,9 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
 
                               return CheckboxListTile(
                                 value: isSelected,
-                                onChanged: (checked) =>
-                                    _toggleItem(id, checked),
+                                onChanged: _selectedGroupId != null
+                                    ? null
+                                    : (checked) => _toggleItem(id, checked),
                                 activeColor: Colors.indigo,
                                 title: Text(
                                   idiom.isEmpty ? '(no idiom)' : idiom,

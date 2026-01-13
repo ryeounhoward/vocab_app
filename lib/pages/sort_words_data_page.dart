@@ -20,6 +20,8 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
   final Set<int> _selectedIds = {};
   bool _isAscending = true;
   final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _wordGroups = [];
+  int? _selectedGroupId;
 
   @override
   void initState() {
@@ -38,20 +40,57 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
         .whereType<int>()
         .toSet();
 
+    final int? storedGroupId = prefs.getInt('quiz_selected_word_group_id');
+
     final data = await _dbHelper.queryAll(DBHelper.tableVocab);
+    final List<Map<String, dynamic>> groups = await _dbHelper
+        .getAllWordGroups();
+
+    List<Map<String, dynamic>> visibleVocab = List<Map<String, dynamic>>.from(
+      data,
+    );
+
+    int? effectiveGroupId;
+    if (!useAll && storedGroupId != null) {
+      final bool groupExists = groups.any(
+        (g) => (g['id'] as int?) != null && g['id'] == storedGroupId,
+      );
+      if (groupExists) {
+        final Set<int> wordIds = await _dbHelper.getWordIdsForGroup(
+          storedGroupId,
+        );
+        visibleVocab = visibleVocab
+            .where((item) => wordIds.contains(item['id'] as int? ?? -1))
+            .toList();
+        effectiveGroupId = storedGroupId;
+      }
+    }
+
+    // Determine selected IDs: if a group is active, treat all words
+    // in that group as selected; otherwise fall back to stored IDs.
+    final Set<int> computedSelectedIds = <int>{};
+    if (!useAll && effectiveGroupId != null) {
+      computedSelectedIds.addAll(
+        visibleVocab.map((e) => e['id']).whereType<int>(),
+      );
+    } else {
+      computedSelectedIds.addAll(
+        visibleVocab
+            .map((e) => e['id'])
+            .whereType<int>()
+            .where((id) => selectedFromPrefs.contains(id)),
+      );
+    }
 
     setState(() {
       _useAllWords = useAll;
-      _allVocab = List<Map<String, dynamic>>.from(data);
+      _allVocab = visibleVocab;
       _filteredVocab = List<Map<String, dynamic>>.from(_allVocab);
       _selectedIds
         ..clear()
-        ..addAll(
-          _allVocab
-              .map((e) => e['id'])
-              .whereType<int>()
-              .where((id) => selectedFromPrefs.contains(id)),
-        );
+        ..addAll(computedSelectedIds);
+      _wordGroups = List<Map<String, dynamic>>.from(groups);
+      _selectedGroupId = effectiveGroupId;
       _isLoading = false;
     });
 
@@ -102,6 +141,42 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
     });
   }
 
+  Future<void> _onGroupChanged(int? groupId) async {
+    if (groupId == _selectedGroupId) return;
+
+    final data = await _dbHelper.queryAll(DBHelper.tableVocab);
+    List<Map<String, dynamic>> visibleVocab = List<Map<String, dynamic>>.from(
+      data,
+    );
+
+    if (groupId != null) {
+      final Set<int> wordIds = await _dbHelper.getWordIdsForGroup(groupId);
+      visibleVocab = visibleVocab
+          .where((item) => wordIds.contains(item['id'] as int? ?? -1))
+          .toList();
+
+      // When a specific group is chosen, turn off "use all" so that
+      // the selection below clearly represents a subset.
+      _useAllWords = false;
+    }
+
+    final Set<int> allowedIds = visibleVocab
+        .map((e) => e['id'])
+        .whereType<int>()
+        .toSet();
+
+    setState(() {
+      _selectedGroupId = groupId;
+      _allVocab = visibleVocab;
+      _filteredVocab = List<Map<String, dynamic>>.from(_allVocab);
+      _selectedIds
+        ..clear()
+        ..addAll(allowedIds);
+    });
+
+    _applySort();
+  }
+
   void _toggleItem(int id, bool? checked) {
     setState(() {
       if (checked == true) {
@@ -129,13 +204,27 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
 
     await prefs.setBool('quiz_use_all_words', _useAllWords);
 
-    if (_useAllWords || _selectedIds.isEmpty) {
+    if (_useAllWords || (_selectedGroupId == null && _selectedIds.isEmpty)) {
       await prefs.remove('quiz_selected_word_ids');
+      await prefs.remove('quiz_selected_word_group_id');
     } else {
+      // If a group is selected, always use that group's words as the
+      // selection for displaying data.
+      Set<int> finalIds = _selectedIds;
+      if (_selectedGroupId != null) {
+        finalIds = await _dbHelper.getWordIdsForGroup(_selectedGroupId!);
+      }
+
       await prefs.setStringList(
         'quiz_selected_word_ids',
-        _selectedIds.map((id) => id.toString()).toList(),
+        finalIds.map((id) => id.toString()).toList(),
       );
+
+      if (_selectedGroupId != null) {
+        await prefs.setInt('quiz_selected_word_group_id', _selectedGroupId!);
+      } else {
+        await prefs.remove('quiz_selected_word_group_id');
+      }
     }
 
     if (!mounted) return;
@@ -159,6 +248,40 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const SizedBox(height: 12),
+                  if (!_useAllWords && _wordGroups.isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Filter by word group (optional)',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        DropdownButtonFormField<int?>(
+                          value: _selectedGroupId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                          ),
+                          hint: const Text('All words (no group filter)'),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('All words (no group filter)'),
+                            ),
+                            ..._wordGroups.map(
+                              (g) => DropdownMenuItem<int?>(
+                                value: g['id'] as int?,
+                                child: Text((g['name'] ?? '').toString()),
+                              ),
+                            ),
+                          ],
+                          onChanged: _onGroupChanged,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _searchController,
@@ -207,7 +330,9 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
                                   ? true
                                   : (_hasAnySelected ? null : false),
                               tristate: true,
-                              onChanged: _toggleSelectAll,
+                              onChanged: _selectedGroupId != null
+                                  ? null
+                                  : _toggleSelectAll,
                             ),
                             const Text('Select all'),
                           ],
@@ -278,8 +403,9 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
 
                               return CheckboxListTile(
                                 value: isSelected,
-                                onChanged: (checked) =>
-                                    _toggleItem(id, checked),
+                                onChanged: _selectedGroupId != null
+                                    ? null
+                                    : (checked) => _toggleItem(id, checked),
                                 activeColor: Colors.indigo,
                                 title: Text(word.isEmpty ? '(no word)' : word),
                                 subtitle: wordType.isEmpty
