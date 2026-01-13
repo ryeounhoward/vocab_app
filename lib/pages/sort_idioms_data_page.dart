@@ -30,17 +30,27 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
   }
 
   Future<void> _loadDataAndPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
+    // Load preferences from the database (app_preferences table)
+    final String? useAllStr = await _dbHelper.getPreference(
+      'quiz_use_all_idioms',
+    );
+    final bool useAll = useAllStr == null ? true : useAllStr == 'true';
 
-    final bool useAll = prefs.getBool('quiz_use_all_idioms') ?? true;
-    final List<String> storedIds =
-        prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
-    final Set<int> selectedFromPrefs = storedIds
-        .map((s) => int.tryParse(s))
-        .whereType<int>()
-        .toSet();
+    final String? idsStr = await _dbHelper.getPreference(
+      'quiz_selected_idiom_ids',
+    );
+    final Set<int> selectedFromPrefs = (idsStr == null || idsStr.isEmpty)
+        ? <int>{}
+        : idsStr
+              .split(',')
+              .map((s) => int.tryParse(s.trim()))
+              .whereType<int>()
+              .toSet();
 
-    final int? storedGroupId = prefs.getInt('quiz_selected_idiom_group_id');
+    final String? groupIdStr = await _dbHelper.getPreference(
+      'quiz_selected_idiom_group_id',
+    );
+    final int? storedGroupId = int.tryParse(groupIdStr ?? '');
 
     final data = await _dbHelper.queryAll(DBHelper.tableIdioms);
     final List<Map<String, dynamic>> groups = await _dbHelper
@@ -201,9 +211,12 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
   Future<void> _saveSelections() async {
     final prefs = await SharedPreferences.getInstance();
 
-    await prefs.setBool('quiz_use_all_idioms', _useAllIdioms);
-
     if (_useAllIdioms || (_selectedGroupId == null && _selectedIds.isEmpty)) {
+      await _dbHelper.removePreference('quiz_use_all_idioms');
+      await _dbHelper.removePreference('quiz_selected_idiom_ids');
+      await _dbHelper.removePreference('quiz_selected_idiom_group_id');
+
+      await prefs.remove('quiz_use_all_idioms');
       await prefs.remove('quiz_selected_idiom_ids');
       await prefs.remove('quiz_selected_idiom_group_id');
     } else {
@@ -214,16 +227,35 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
         finalIds = await _dbHelper.getIdiomIdsForGroup(_selectedGroupId!);
       }
 
+      await _dbHelper.setPreference(
+        'quiz_selected_idiom_ids',
+        finalIds.map((id) => id.toString()).join(','),
+      );
+
       await prefs.setStringList(
         'quiz_selected_idiom_ids',
         finalIds.map((id) => id.toString()).toList(),
       );
 
       if (_selectedGroupId != null) {
+        await _dbHelper.setPreference(
+          'quiz_selected_idiom_group_id',
+          _selectedGroupId!.toString(),
+        );
+
         await prefs.setInt('quiz_selected_idiom_group_id', _selectedGroupId!);
       } else {
+        await _dbHelper.removePreference('quiz_selected_idiom_group_id');
+
         await prefs.remove('quiz_selected_idiom_group_id');
       }
+
+      await _dbHelper.setPreference(
+        'quiz_use_all_idioms',
+        _useAllIdioms ? 'true' : 'false',
+      );
+
+      await prefs.setBool('quiz_use_all_idioms', _useAllIdioms);
     }
 
     if (!mounted) return;

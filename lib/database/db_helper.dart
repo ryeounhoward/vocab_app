@@ -11,6 +11,7 @@ class DBHelper {
   static const String tableWordGroupItems = "word_group_items";
   static const String tableIdiomGroups = "idiom_groups";
   static const String tableIdiomGroupItems = "idiom_group_items";
+  static const String tablePreferences = "app_preferences";
 
   Future<Database> get db async {
     if (_db != null) return _db!;
@@ -22,7 +23,7 @@ class DBHelper {
     String path = join(await getDatabasesPath(), "vocab.db");
     return await openDatabase(
       path,
-      version: 8, // Version 8 adds idiom group tables
+      version: 9, // Version 9 adds app_preferences table
       onCreate: (db, version) async {
         // Create Vocabulary Table
         await db.execute('''
@@ -83,6 +84,14 @@ class DBHelper {
           idiom_id INTEGER NOT NULL
         )
         ''');
+
+        // Create simple key-value preferences table
+        await db.execute('''
+        CREATE TABLE $tablePreferences (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        )
+        ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -139,6 +148,16 @@ class DBHelper {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               group_id INTEGER NOT NULL,
               idiom_id INTEGER NOT NULL
+            )
+          ''');
+        }
+
+        // Add preferences table on upgrade
+        if (oldVersion < 9) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS $tablePreferences (
+              key TEXT PRIMARY KEY,
+              value TEXT
             )
           ''');
         }
@@ -204,6 +223,35 @@ class DBHelper {
   Future<void> clearTable([String table = tableVocab]) async {
     Database dbClient = await db;
     await dbClient.delete(table);
+  }
+
+  // --- APP PREFERENCES (KEY-VALUE) ---
+
+  Future<void> setPreference(String key, String value) async {
+    final Database dbClient = await db;
+    await dbClient.insert(tablePreferences, {
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> getPreference(String key) async {
+    final Database dbClient = await db;
+    final List<Map<String, dynamic>> rows = await dbClient.query(
+      tablePreferences,
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  Future<void> removePreference(String key) async {
+    final Database dbClient = await db;
+    await dbClient.delete(tablePreferences, where: 'key = ?', whereArgs: [key]);
   }
 
   // --- WORD GROUP HELPERS ---

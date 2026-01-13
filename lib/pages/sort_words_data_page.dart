@@ -30,17 +30,27 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
   }
 
   Future<void> _loadDataAndPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
+    // Load preferences from the database (app_preferences table)
+    final String? useAllStr = await _dbHelper.getPreference(
+      'quiz_use_all_words',
+    );
+    final bool useAll = useAllStr == null ? true : useAllStr == 'true';
 
-    final bool useAll = prefs.getBool('quiz_use_all_words') ?? true;
-    final List<String> storedIds =
-        prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
-    final Set<int> selectedFromPrefs = storedIds
-        .map((s) => int.tryParse(s))
-        .whereType<int>()
-        .toSet();
+    final String? idsStr = await _dbHelper.getPreference(
+      'quiz_selected_word_ids',
+    );
+    final Set<int> selectedFromPrefs = (idsStr == null || idsStr.isEmpty)
+        ? <int>{}
+        : idsStr
+              .split(',')
+              .map((s) => int.tryParse(s.trim()))
+              .whereType<int>()
+              .toSet();
 
-    final int? storedGroupId = prefs.getInt('quiz_selected_word_group_id');
+    final String? groupIdStr = await _dbHelper.getPreference(
+      'quiz_selected_word_group_id',
+    );
+    final int? storedGroupId = int.tryParse(groupIdStr ?? '');
 
     final data = await _dbHelper.queryAll(DBHelper.tableVocab);
     final List<Map<String, dynamic>> groups = await _dbHelper
@@ -202,9 +212,12 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
   Future<void> _saveSelections() async {
     final prefs = await SharedPreferences.getInstance();
 
-    await prefs.setBool('quiz_use_all_words', _useAllWords);
-
     if (_useAllWords || (_selectedGroupId == null && _selectedIds.isEmpty)) {
+      await _dbHelper.removePreference('quiz_use_all_words');
+      await _dbHelper.removePreference('quiz_selected_word_ids');
+      await _dbHelper.removePreference('quiz_selected_word_group_id');
+
+      await prefs.remove('quiz_use_all_words');
       await prefs.remove('quiz_selected_word_ids');
       await prefs.remove('quiz_selected_word_group_id');
     } else {
@@ -215,16 +228,35 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
         finalIds = await _dbHelper.getWordIdsForGroup(_selectedGroupId!);
       }
 
+      await _dbHelper.setPreference(
+        'quiz_selected_word_ids',
+        finalIds.map((id) => id.toString()).join(','),
+      );
+
       await prefs.setStringList(
         'quiz_selected_word_ids',
         finalIds.map((id) => id.toString()).toList(),
       );
 
       if (_selectedGroupId != null) {
+        await _dbHelper.setPreference(
+          'quiz_selected_word_group_id',
+          _selectedGroupId!.toString(),
+        );
+
         await prefs.setInt('quiz_selected_word_group_id', _selectedGroupId!);
       } else {
+        await _dbHelper.removePreference('quiz_selected_word_group_id');
+
         await prefs.remove('quiz_selected_word_group_id');
       }
+
+      await _dbHelper.setPreference(
+        'quiz_use_all_words',
+        _useAllWords ? 'true' : 'false',
+      );
+
+      await prefs.setBool('quiz_use_all_words', _useAllWords);
     }
 
     if (!mounted) return;
