@@ -290,7 +290,7 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
                         ),
                         const SizedBox(height: 4),
                         DropdownButtonFormField<int?>(
-                          value: _selectedGroupId,
+                          initialValue: _selectedGroupId,
                           isExpanded: true,
                           decoration: const InputDecoration(
                             border: OutlineInputBorder(),
@@ -344,7 +344,7 @@ class _SortIdiomsDataPageState extends State<SortIdiomsDataPage> {
                     subtitle: const Text(
                       'Include all idioms in quizzes, practice, and review.',
                     ),
-                    activeColor: Colors.indigo,
+                    activeThumbColor: Colors.indigo,
                     value: _useAllIdioms,
                     onChanged: _toggleUseAll,
                   ),

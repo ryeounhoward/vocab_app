@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../database/db_helper.dart';
+import '../services/ai_defaults.dart';
 
 class ApiSettingsPage extends StatefulWidget {
   const ApiSettingsPage({super.key});
@@ -14,6 +15,7 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
 
   final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
+  final TextEditingController _instructionsController = TextEditingController();
 
   // Default button image if none selected yet
   final List<String> _buttonImages = const <String>[
@@ -39,6 +41,9 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     final String? storedButton = await _dbHelper.getPreference(
       'gemini_button_image',
     );
+    final String? storedInstructions = await _dbHelper.getPreference(
+      'gemini_system_instructions',
+    );
 
     if (!mounted) return;
 
@@ -54,6 +59,11 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
       if (storedButton != null && storedButton.isNotEmpty) {
         _selectedButtonImage = storedButton;
       }
+      if (storedInstructions != null && storedInstructions.isNotEmpty) {
+        _instructionsController.text = storedInstructions;
+      } else {
+        _instructionsController.text = defaultGeminiVocabInstructions;
+      }
       _isLoading = false;
     });
   }
@@ -61,6 +71,7 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
   Future<void> _saveSettings() async {
     final String apiKey = _apiKeyController.text.trim();
     final String model = _modelController.text.trim();
+    final String instructions = _instructionsController.text.trim();
 
     if (apiKey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,6 +90,10 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     await _dbHelper.setPreference('gemini_api_key', apiKey);
     await _dbHelper.setPreference('gemini_model', model);
     await _dbHelper.setPreference('gemini_button_image', _selectedButtonImage);
+    await _dbHelper.setPreference(
+      'gemini_system_instructions',
+      instructions.isNotEmpty ? instructions : defaultGeminiVocabInstructions,
+    );
 
     if (!mounted) return;
 
@@ -93,6 +108,7 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
   void dispose() {
     _apiKeyController.dispose();
     _modelController.dispose();
+    _instructionsController.dispose();
     super.dispose();
   }
 
@@ -141,6 +157,25 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       hintText: 'e.g. gemini-2.5-flash',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Personalized AI Instructions',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _instructionsController,
+                    minLines: 6,
+                    maxLines: 12,
+                    keyboardType: TextInputType.multiline,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                      hintText:
+                          'Customize how Gemini should generate your vocabulary cards.\n'
+                          'These instructions are sent as system-level guidance.',
                     ),
                   ),
                   const SizedBox(height: 20),

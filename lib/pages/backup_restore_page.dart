@@ -99,6 +99,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         "idioms": idiomData,
       };
 
+      // Include word groups (by group name and word text) in JSON backup
+      final List<Map<String, dynamic>> wordGroupsPayload =
+          await _buildWordGroupsPayload(vocabData);
+      if (wordGroupsPayload.isNotEmpty) {
+        backupData['word_groups'] = wordGroupsPayload;
+      }
+
       String jsonString = jsonEncode(backupData);
       Uint8List bytes = Uint8List.fromList(utf8.encode(jsonString));
 
@@ -134,10 +141,14 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
         List<dynamic> vocabToProcess = [];
         List<dynamic> idiomsToProcess = [];
+        List<dynamic> wordGroupsToProcess = [];
 
         if (jsonData is Map && jsonData.containsKey('vocabulary')) {
           vocabToProcess = jsonData['vocabulary'] ?? [];
           idiomsToProcess = jsonData['idioms'] ?? [];
+          if (jsonData['word_groups'] is List) {
+            wordGroupsToProcess = jsonData['word_groups'] as List<dynamic>;
+          }
         } else if (jsonData is List) {
           vocabToProcess = jsonData;
         }
@@ -175,8 +186,11 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
               DBHelper.tableIdioms,
               'idiom',
             );
+            int createdWordGroups = await _processWordGroupsImport(
+              wordGroupsToProcess,
+            );
             _showSnackBar(
-              "Import Finished!\nAdded: $addedWords words, $addedIdioms idioms.",
+              "Import Finished!\nAdded: $addedWords words, $addedIdioms idioms, $createdWordGroups word groups.",
             );
           } finally {
             _hideLoadingDialog();
@@ -236,6 +250,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         "vocabulary": vocabData,
         "idioms": idiomData,
       };
+
+      // Include word groups (by group name and word text) in ZIP backup
+      final List<Map<String, dynamic>> wordGroupsPayload =
+          await _buildWordGroupsPayload(vocabData);
+      if (wordGroupsPayload.isNotEmpty) {
+        backupPayload['word_groups'] = wordGroupsPayload;
+      }
 
       if (sortWordSettings.isNotEmpty) {
         backupPayload['sort_word_settings'] = sortWordSettings;
@@ -330,6 +351,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         // Use the common import handler
         List<dynamic> vocabToProcess = jsonData['vocabulary'] ?? [];
         List<dynamic> idiomsToProcess = jsonData['idioms'] ?? [];
+        List<dynamic> wordGroupsToProcess = [];
+        if (jsonData is Map && jsonData['word_groups'] is List) {
+          wordGroupsToProcess = jsonData['word_groups'] as List<dynamic>;
+        }
 
         // Optional: restore sort word settings if present in backup
         Map<String, dynamic>? sortWordSettings;
@@ -344,7 +369,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           builder: (context) => AlertDialog(
             title: const Text("Import ZIP Backup"),
             content: Text(
-              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n\nContinue?",
+              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n\nContinue?",
             ),
             actions: [
               TextButton(
@@ -393,8 +418,11 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
               DBHelper.tableIdioms,
               'idiom',
             );
+            int createdWordGroups = await _processWordGroupsImport(
+              wordGroupsToProcess,
+            );
             _showSnackBar(
-              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, and $photoCount photos.",
+              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, and $photoCount photos.",
             );
           } finally {
             _hideLoadingDialog();
@@ -434,6 +462,137 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       }
     }
     return addedCount;
+  }
+
+  // --- WORD GROUP EXPORT/IMPORT HELPERS ---
+
+  // Build a portable representation of word groups referencing words by text,
+  // so we can safely restore them on another device where IDs differ.
+  Future<List<Map<String, dynamic>>> _buildWordGroupsPayload(
+    List<Map<String, dynamic>> vocabData,
+  ) async {
+    if (vocabData.isEmpty) return [];
+
+    // Map word IDs to their text for quick lookup
+    final Map<int, String> wordIdToText = {};
+    for (final Map<String, dynamic> row in vocabData) {
+      final dynamic idValue = row['id'];
+      final dynamic wordValue = row['word'];
+      if (idValue is int && wordValue != null) {
+        final String wordText = wordValue.toString();
+        if (wordText.trim().isNotEmpty) {
+          wordIdToText[idValue] = wordText;
+        }
+      }
+    }
+
+    if (wordIdToText.isEmpty) return [];
+
+    final List<Map<String, dynamic>> groups = await _dbHelper
+        .getAllWordGroups();
+    final List<Map<String, dynamic>> result = [];
+
+    for (final Map<String, dynamic> group in groups) {
+      final dynamic groupIdValue = group['id'];
+      final dynamic groupNameValue = group['name'];
+      if (groupIdValue is! int || groupNameValue == null) continue;
+
+      final String groupName = groupNameValue.toString();
+      if (groupName.trim().isEmpty) continue;
+
+      final Set<int> wordIds = await _dbHelper.getWordIdsForGroup(groupIdValue);
+      final List<String> wordsInGroup = [];
+      for (final int wid in wordIds) {
+        final String? wordText = wordIdToText[wid];
+        if (wordText != null && wordText.trim().isNotEmpty) {
+          wordsInGroup.add(wordText);
+        }
+      }
+
+      if (wordsInGroup.isNotEmpty) {
+        result.add({'name': groupName, 'words': wordsInGroup});
+      }
+    }
+
+    return result;
+  }
+
+  // Restore word groups from backup, matching words by their text.
+  Future<int> _processWordGroupsImport(List<dynamic> groups) async {
+    if (groups.isEmpty) return 0;
+
+    // Build lookup from normalized word text to its current DB id
+    final List<Map<String, dynamic>> allWords = await _dbHelper.queryAll(
+      DBHelper.tableVocab,
+    );
+    final Map<String, int> wordKeyToId = {};
+    for (final Map<String, dynamic> row in allWords) {
+      final dynamic idValue = row['id'];
+      final dynamic wordValue = row['word'];
+      if (idValue is int && wordValue != null) {
+        final String key = wordValue.toString().toLowerCase().trim();
+        if (key.isNotEmpty) {
+          wordKeyToId[key] = idValue;
+        }
+      }
+    }
+
+    if (wordKeyToId.isEmpty) return 0;
+
+    // Existing groups by normalized name
+    final List<Map<String, dynamic>> existingGroups = await _dbHelper
+        .getAllWordGroups();
+    final Map<String, int> groupNameToId = {};
+    for (final Map<String, dynamic> row in existingGroups) {
+      final dynamic idValue = row['id'];
+      final dynamic nameValue = row['name'];
+      if (idValue is int && nameValue != null) {
+        final String key = nameValue.toString().toLowerCase().trim();
+        if (key.isNotEmpty) {
+          groupNameToId[key] = idValue;
+        }
+      }
+    }
+
+    int createdGroups = 0;
+
+    for (final dynamic raw in groups) {
+      if (raw is! Map) continue;
+      final dynamic nameValue = raw['name'];
+      final dynamic wordsValue = raw['words'];
+
+      if (nameValue == null || wordsValue is! List) continue;
+
+      final String groupName = nameValue.toString().trim();
+      if (groupName.isEmpty) continue;
+
+      final String groupKey = groupName.toLowerCase();
+      int groupId;
+      if (groupNameToId.containsKey(groupKey)) {
+        groupId = groupNameToId[groupKey]!;
+      } else {
+        groupId = await _dbHelper.insertWordGroup(groupName);
+        groupNameToId[groupKey] = groupId;
+        createdGroups++;
+      }
+
+      final Set<int> wordIds = {};
+      for (final dynamic w in wordsValue) {
+        if (w == null) continue;
+        final String key = w.toString().toLowerCase().trim();
+        if (key.isEmpty) continue;
+        final int? wid = wordKeyToId[key];
+        if (wid != null) {
+          wordIds.add(wid);
+        }
+      }
+
+      if (wordIds.isNotEmpty) {
+        await _dbHelper.setGroupWords(groupId, wordIds);
+      }
+    }
+
+    return createdGroups;
   }
 
   @override

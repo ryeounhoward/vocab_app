@@ -94,7 +94,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             contentPadding: EdgeInsets.zero,
             title: const Text("Enable Sound Effects"),
             subtitle: const Text("Play sounds for correct/wrong answers"),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableSound,
             onChanged: (val) {
               setState(() => _enableSound = val);
@@ -104,7 +104,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             contentPadding: EdgeInsets.zero,
             title: const Text("Enable Game Result Sound"),
             subtitle: const Text("Play a sound at the end of each quiz"),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableResultSound,
             onChanged: (val) {
               setState(() => _enableResultSound = val);
@@ -124,7 +124,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             subtitle: const Text(
               "60 seconds per question. Total time = items × 60.",
             ),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableCountdownTimer,
             onChanged: (val) {
               setState(() {
@@ -137,7 +137,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             contentPadding: EdgeInsets.zero,
             title: const Text("Duration timer"),
             subtitle: const Text("Count how long you take to finish the quiz."),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableDurationTimer,
             onChanged: (val) {
               setState(() {

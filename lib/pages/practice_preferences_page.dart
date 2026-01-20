@@ -99,7 +99,7 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
             subtitle: const Text(
               'Play a swoosh sound when revealing the answer card',
             ),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableSwooshSound,
             onChanged: (val) => _updateSwooshSound(val),
           ),
@@ -107,7 +107,7 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Enable Favorite Star Sound'),
             subtitle: const Text('Play a sound when marking items as favorite'),
-            activeColor: Colors.indigo,
+            activeThumbColor: Colors.indigo,
             value: _enableFavoriteSound,
             onChanged: (val) => _updateFavoriteSound(val),
           ),

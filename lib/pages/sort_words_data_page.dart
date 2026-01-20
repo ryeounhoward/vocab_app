@@ -291,7 +291,7 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
                         ),
                         const SizedBox(height: 4),
                         DropdownButtonFormField<int?>(
-                          value: _selectedGroupId,
+                          initialValue: _selectedGroupId,
                           isExpanded: true,
                           decoration: const InputDecoration(
                             border: OutlineInputBorder(),
@@ -346,7 +346,7 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
                     subtitle: const Text(
                       'Include all words in quizzes, practice, and review.',
                     ),
-                    activeColor: Colors.indigo,
+                    activeThumbColor: Colors.indigo,
                     value: _useAllWords,
                     onChanged: _toggleUseAll,
                   ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/idiom_review_page.dart';
 import 'package:vocab_app/pages/review_page.dart';
-import 'package:vocab_app/pages/conversation_page.dart';
 
 class MenuPage extends StatelessWidget {
   const MenuPage({super.key});

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../database/db_helper.dart';
+import '../services/ai_defaults.dart';
 
 class AddEditPage extends StatefulWidget {
   final Map<String, dynamic>? vocabItem;
@@ -26,6 +27,8 @@ class _AddEditPageState extends State<AddEditPage> {
   String _modelName = 'gemini-2.5-flash';
   String _buttonImageAsset = 'assets/images/gemini-2.png';
   bool _isGenerating = false;
+  // System-level instructions for Gemini (personalized context)
+  String _aiSystemInstructions = defaultGeminiVocabInstructions;
 
   final TextEditingController _wordController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
@@ -38,7 +41,7 @@ class _AddEditPageState extends State<AddEditPage> {
   String? _imagePath;
   bool _isDownloading = false;
 
-  List<String> _types = [
+  final List<String> _types = [
     'Noun',
     'Verb',
     'Pronoun',
@@ -86,6 +89,9 @@ class _AddEditPageState extends State<AddEditPage> {
     final String? storedButton = await dbHelper.getPreference(
       'gemini_button_image',
     );
+    final String? storedInstructions = await dbHelper.getPreference(
+      'gemini_system_instructions',
+    );
 
     if (!mounted) return;
 
@@ -100,6 +106,12 @@ class _AddEditPageState extends State<AddEditPage> {
 
       if (storedButton != null && storedButton.isNotEmpty) {
         _buttonImageAsset = storedButton;
+      }
+
+      if (storedInstructions != null && storedInstructions.isNotEmpty) {
+        _aiSystemInstructions = storedInstructions;
+      } else {
+        _aiSystemInstructions = defaultGeminiVocabInstructions;
       }
     });
   }
@@ -126,24 +138,14 @@ class _AddEditPageState extends State<AddEditPage> {
 
     try {
       // Use the configured Gemini model and API key
-      final model = GenerativeModel(model: _modelName, apiKey: _apiKey!);
+      final model = GenerativeModel(
+        model: _modelName,
+        apiKey: _apiKey!,
+        systemInstruction: Content.text(_aiSystemInstructions),
+      );
 
-      // Your exact personal instructions for the prompt
-      final prompt =
-          '''
-    Instructions:
-    When I provide a vocabulary word, create a structured vocabulary card with the following sections: 
-    - Word: use the root form of the word, for idioms, use the original idiom form.
-    - Type of Speech: identify the word using one of the 8 standard parts of speech in English only: Noun, Pronoun, Verb, Adjective, Adverb, Preposition, Conjunction, Interjection.
-    - Meaning: state the meaning directly and clearly, concise paragraph, no extra commentary.
-    - Synonyms: present in comma-separated format, with each synonym starting with an uppercase letter.
-    - Examples: provide at least three clear example sentences using the word naturally.
-
-    Word to process: "$inputWord"
-
-    Return the result ONLY as a valid raw JSON object with these keys:
-    "word", "type", "meaning", "synonyms", "examples" (where examples is an array of strings).
-    ''';
+      // Runtime prompt only supplies the specific word
+      final prompt = 'Word to process: "$inputWord"';
 
       final response = await model.generateContent([Content.text(prompt)]);
       final text = response.text;
@@ -408,8 +410,9 @@ class _AddEditPageState extends State<AddEditPage> {
                       final newType = await _showAddWordTypeDialog();
                       if (newType != null && newType.trim().isNotEmpty) {
                         setState(() {
-                          if (!_types.contains(newType.trim()))
+                          if (!_types.contains(newType.trim())) {
                             _types.add(newType.trim());
+                          }
                           _wordType = newType.trim();
                         });
                       }
@@ -465,8 +468,9 @@ class _AddEditPageState extends State<AddEditPage> {
                             color: Colors.red,
                           ),
                           onPressed: () {
-                            if (_exampleControllers.length > 1)
+                            if (_exampleControllers.length > 1) {
                               setState(() => _exampleControllers.removeAt(idx));
+                            }
                           },
                         ),
                       ],
