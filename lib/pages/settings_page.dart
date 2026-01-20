@@ -6,6 +6,7 @@ import 'package:vocab_app/pages/about_page.dart';
 import 'package:vocab_app/pages/manage_idioms_page.dart';
 import 'package:vocab_app/pages/vocabulary_test_settings_page.dart';
 import 'package:vocab_app/pages/word_of_day_page.dart';
+import 'api_settings_page.dart';
 import 'voice_selection_page.dart';
 import 'practice_preferences_page.dart';
 import 'sort_data_page.dart';
@@ -152,6 +153,20 @@ class SettingsPage extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const VoiceSelectionPage(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.auto_awesome, color: Colors.indigo),
+            title: const Text("APIs"),
+            subtitle: const Text("Add your Gemini API key & model"),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ApiSettingsPage(),
                 ),
               );
             },

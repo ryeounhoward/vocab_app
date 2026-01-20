@@ -208,12 +208,40 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
       var archive = Archive();
 
-      // Add Database JSON to ZIP
-      String jsonString = jsonEncode({
+      // Read sort-words related preferences to include in backup
+      final String? quizUseAll = await _dbHelper.getPreference(
+        'quiz_use_all_words',
+      );
+      final String? quizSelectedIds = await _dbHelper.getPreference(
+        'quiz_selected_word_ids',
+      );
+      final String? quizSelectedGroupId = await _dbHelper.getPreference(
+        'quiz_selected_word_group_id',
+      );
+
+      final Map<String, dynamic> sortWordSettings = {};
+      if (quizUseAll != null) {
+        sortWordSettings['quiz_use_all_words'] = quizUseAll;
+      }
+      if (quizSelectedIds != null) {
+        sortWordSettings['quiz_selected_word_ids'] = quizSelectedIds;
+      }
+      if (quizSelectedGroupId != null) {
+        sortWordSettings['quiz_selected_word_group_id'] = quizSelectedGroupId;
+      }
+
+      // Add Database JSON (including sort word settings) to ZIP
+      final Map<String, dynamic> backupPayload = {
         "version": 1,
         "vocabulary": vocabData,
         "idioms": idiomData,
-      });
+      };
+
+      if (sortWordSettings.isNotEmpty) {
+        backupPayload['sort_word_settings'] = sortWordSettings;
+      }
+
+      String jsonString = jsonEncode(backupPayload);
       List<int> jsonBytes = utf8.encode(jsonString);
       archive.addFile(
         ArchiveFile('data/backup.json', jsonBytes.length, jsonBytes),
@@ -303,6 +331,14 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         List<dynamic> vocabToProcess = jsonData['vocabulary'] ?? [];
         List<dynamic> idiomsToProcess = jsonData['idioms'] ?? [];
 
+        // Optional: restore sort word settings if present in backup
+        Map<String, dynamic>? sortWordSettings;
+        if (jsonData is Map && jsonData['sort_word_settings'] is Map) {
+          sortWordSettings = Map<String, dynamic>.from(
+            jsonData['sort_word_settings'],
+          );
+        }
+
         bool? confirm = await showDialog(
           context: context,
           builder: (context) => AlertDialog(
@@ -326,6 +362,27 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         if (confirm == true) {
           await _showLoadingDialog("Importing ZIP backup (data + photos)...");
           try {
+            if (sortWordSettings != null) {
+              if (sortWordSettings.containsKey('quiz_use_all_words')) {
+                await _dbHelper.setPreference(
+                  'quiz_use_all_words',
+                  sortWordSettings['quiz_use_all_words'].toString(),
+                );
+              }
+              if (sortWordSettings.containsKey('quiz_selected_word_ids')) {
+                await _dbHelper.setPreference(
+                  'quiz_selected_word_ids',
+                  sortWordSettings['quiz_selected_word_ids'].toString(),
+                );
+              }
+              if (sortWordSettings.containsKey('quiz_selected_word_group_id')) {
+                await _dbHelper.setPreference(
+                  'quiz_selected_word_group_id',
+                  sortWordSettings['quiz_selected_word_group_id'].toString(),
+                );
+              }
+            }
+
             int addedWords = await _processImport(
               vocabToProcess,
               DBHelper.tableVocab,
