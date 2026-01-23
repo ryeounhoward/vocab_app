@@ -124,27 +124,20 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
           ),
           const SizedBox(height: 10),
           // Practice mode (words vs idioms)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: _practiceMode,
-                items: const [
-                  DropdownMenuItem(value: 'vocab', child: Text('Words')),
-                  DropdownMenuItem(value: 'idiom', child: Text('Idioms')),
-                ],
-                onChanged: (val) {
-                  if (val != null) {
-                    _updatePracticeMode(val);
-                  }
-                },
-              ),
-            ),
+          DropdownMenu<String>(
+            width: MediaQuery.of(context).size.width - 48,
+            menuHeight: 250,
+            initialSelection: _practiceMode,
+            label: const Text('Practice content'),
+            onSelected: (String? value) {
+              if (value != null) {
+                _updatePracticeMode(value);
+              }
+            },
+            dropdownMenuEntries: const [
+              DropdownMenuEntry<String>(value: 'vocab', label: 'Words'),
+              DropdownMenuEntry<String>(value: 'idiom', label: 'Idioms'),
+            ],
           ),
           const SizedBox(height: 16),
           const Text(
@@ -157,34 +150,27 @@ class _PracticePreferencesPageState extends State<PracticePreferencesPage> {
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: _practiceOrder,
-                items: const [
-                  DropdownMenuItem(value: 'shuffle', child: Text('Shuffle')),
-                  DropdownMenuItem(
-                    value: 'az',
-                    child: Text('Ascending (A - Z)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'za',
-                    child: Text('Descending (Z - A)'),
-                  ),
-                ],
-                onChanged: (val) {
-                  if (val != null) {
-                    _updatePracticeOrder(val);
-                  }
-                },
+          DropdownMenu<String>(
+            width: MediaQuery.of(context).size.width - 48,
+            menuHeight: 250,
+            initialSelection: _practiceOrder,
+            label: const Text('Order'),
+            onSelected: (String? value) {
+              if (value != null) {
+                _updatePracticeOrder(value);
+              }
+            },
+            dropdownMenuEntries: const [
+              DropdownMenuEntry<String>(value: 'shuffle', label: 'Shuffle'),
+              DropdownMenuEntry<String>(
+                value: 'az',
+                label: 'Ascending (A - Z)',
               ),
-            ),
+              DropdownMenuEntry<String>(
+                value: 'za',
+                label: 'Descending (Z - A)',
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           SizedBox(

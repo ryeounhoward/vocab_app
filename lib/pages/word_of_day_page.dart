@@ -161,27 +161,23 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
           ),
           Padding(
             padding: EdgeInsets.zero,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  isExpanded: true,
-                  value: _wordCount,
-                  items: List.generate(5, (index) => index + 1).map((
-                    int value,
-                  ) {
-                    return DropdownMenuItem<int>(
+            child: DropdownMenu<int>(
+              width: MediaQuery.of(context).size.width - 48,
+              menuHeight: 250,
+              initialSelection: _wordCount,
+              label: const Text('Words per Notification'),
+              onSelected: (int? value) {
+                if (value == null) return;
+                setState(() => _wordCount = value);
+              },
+              dropdownMenuEntries: List.generate(5, (index) => index + 1)
+                  .map(
+                    (int value) => DropdownMenuEntry<int>(
                       value: value,
-                      child: Text("$value ${value == 1 ? "Word" : "Words"}"),
-                    );
-                  }).toList(),
-                  onChanged: (val) => setState(() => _wordCount = val!),
-                ),
-              ),
+                      label: '$value ${value == 1 ? "Word" : "Words"}',
+                    ),
+                  )
+                  .toList(),
             ),
           ),
 
@@ -193,27 +189,23 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
           ),
           Padding(
             padding: EdgeInsets.zero,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  isExpanded: true,
-                  value: _intervalHours,
-                  items: List.generate(12, (index) => index + 1).map((
-                    int value,
-                  ) {
-                    return DropdownMenuItem<int>(
+            child: DropdownMenu<int>(
+              width: MediaQuery.of(context).size.width - 48,
+              menuHeight: 250,
+              initialSelection: _intervalHours,
+              label: const Text('Remind me every:'),
+              onSelected: (int? value) {
+                if (value == null) return;
+                setState(() => _intervalHours = value);
+              },
+              dropdownMenuEntries: List.generate(12, (index) => index + 1)
+                  .map(
+                    (int value) => DropdownMenuEntry<int>(
                       value: value,
-                      child: Text("$value ${value == 1 ? "Hour" : "Hours"}"),
-                    );
-                  }).toList(),
-                  onChanged: (val) => setState(() => _intervalHours = val!),
-                ),
-              ),
+                      label: '$value ${value == 1 ? "Hour" : "Hours"}',
+                    ),
+                  )
+                  .toList(),
             ),
           ),
 

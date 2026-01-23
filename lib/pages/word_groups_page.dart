@@ -306,26 +306,10 @@ class _WordGroupsPageState extends State<WordGroupsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Group selector and name
+                  // Group selector and actions
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Expanded(
-                        child: DropdownButton<int?>(
-                          isExpanded: true,
-                          value: _currentGroupId,
-                          hint: const Text('Select group'),
-                          items: [
-                            ..._groups.map(
-                              (g) => DropdownMenuItem<int?>(
-                                value: g['id'] as int?,
-                                child: Text((g['name'] ?? '').toString()),
-                              ),
-                            ),
-                          ],
-                          onChanged: _onSelectGroup,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.edit),
                         tooltip: 'Rename current group',
@@ -345,6 +329,24 @@ class _WordGroupsPageState extends State<WordGroupsPage> {
                             : _deleteCurrentGroup,
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownMenu<int?>(
+                    width: MediaQuery.of(context).size.width - 32,
+                    menuHeight: 250,
+                    initialSelection: _currentGroupId,
+                    label: const Text('Word group'),
+                    onSelected: (int? value) {
+                      _onSelectGroup(value);
+                    },
+                    dropdownMenuEntries: _groups
+                        .map(
+                          (g) => DropdownMenuEntry<int?>(
+                            value: g['id'] as int?,
+                            label: (g['name'] ?? '').toString(),
+                          ),
+                        )
+                        .toList(),
                   ),
                   const SizedBox(height: 16),
                   // Search bar for words

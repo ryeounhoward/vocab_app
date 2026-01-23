@@ -290,26 +290,26 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
-                        DropdownButtonFormField<int?>(
-                          initialValue: _selectedGroupId,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                          ),
-                          hint: const Text('All words (no group filter)'),
-                          items: [
-                            const DropdownMenuItem<int?>(
+                        DropdownMenu<int?>(
+                          width: MediaQuery.of(context).size.width - 32,
+                          menuHeight: 250,
+                          initialSelection: _selectedGroupId,
+                          label: const Text('Word group'),
+                          onSelected: (int? value) {
+                            _onGroupChanged(value);
+                          },
+                          dropdownMenuEntries: [
+                            const DropdownMenuEntry<int?>(
                               value: null,
-                              child: Text('All words (no group filter)'),
+                              label: 'All words (no group filter)',
                             ),
                             ..._wordGroups.map(
-                              (g) => DropdownMenuItem<int?>(
+                              (g) => DropdownMenuEntry<int?>(
                                 value: g['id'] as int?,
-                                child: Text((g['name'] ?? '').toString()),
+                                label: (g['name'] ?? '').toString(),
                               ),
                             ),
                           ],
-                          onChanged: _onGroupChanged,
                         ),
                         const SizedBox(height: 12),
                       ],

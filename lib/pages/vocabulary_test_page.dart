@@ -322,6 +322,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _emptyReason = null;
 
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
+    final bool useAllItems = prefs.getBool('quiz_use_all_items') ?? false;
     // Load quiz mode and timer settings from preferences
     _quizMode = requestedMode;
 
@@ -513,16 +514,22 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     List<Map<String, dynamic>> finalQuestions = [];
 
-    if (allWords.length >= targetCount) {
-      allWords.shuffle();
-      finalQuestions = allWords.take(targetCount).toList();
+    allWords.shuffle();
+
+    if (useAllItems) {
+      // Use the full pool without duplicates.
+      finalQuestions = List<Map<String, dynamic>>.from(allWords);
     } else {
-      finalQuestions.addAll(allWords);
-      final random = Random();
-      while (finalQuestions.length < targetCount) {
-        finalQuestions.add(allWords[random.nextInt(allWords.length)]);
+      // Cap at the number of available items so we don't exceed
+      // the maximum words based on stored data.
+      int effectiveCount = targetCount;
+      if (effectiveCount <= 0) {
+        effectiveCount = allWords.length;
+      } else if (effectiveCount > allWords.length) {
+        effectiveCount = allWords.length;
       }
-      finalQuestions.shuffle();
+
+      finalQuestions = allWords.take(effectiveCount).toList();
     }
 
     _quizData = finalQuestions

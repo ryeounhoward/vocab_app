@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
+import '../database/db_helper.dart';
 
 class QuizSettingsPage extends StatefulWidget {
   const QuizSettingsPage({super.key});
@@ -11,9 +12,12 @@ class QuizSettingsPage extends StatefulWidget {
 
 class _QuizSettingsPageState extends State<QuizSettingsPage> {
   final TextEditingController _countController = TextEditingController();
+  final DBHelper _dbHelper = DBHelper();
 
   // State variables
   int _currentLimit = 10;
+  bool _useAllWords = false;
+  int _maxAvailableItems = 0;
   bool _enableSound = true;
   bool _enableResultSound = true;
   bool _enableCountdownTimer = false;
@@ -28,38 +32,45 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final String quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+    final int maxItems = await _computeMaxAvailableItems(prefs, quizMode);
+
     setState(() {
       _currentLimit = prefs.getInt('quiz_total_items') ?? 10;
+      _useAllWords = prefs.getBool('quiz_use_all_items') ?? false;
       _enableSound = prefs.getBool('quiz_sound_enabled') ?? true;
       _enableResultSound = prefs.getBool('quiz_result_sound_enabled') ?? true;
       bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
       bool duration =
           prefs.getBool('quiz_duration_timer_enabled') ?? !countdown;
 
-      // Ensure only one timer type is enabled at a time
       if (countdown && duration) {
         duration = false; // Prefer countdown if both somehow true
       }
 
       _enableCountdownTimer = countdown;
       _enableDurationTimer = duration;
-      // Load quiz mode (defaulting to description -> word if not set)
-      _quizMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+      _quizMode = quizMode;
+      _maxAvailableItems = maxItems;
       _countController.text = _currentLimit.toString();
     });
   }
 
   Future<void> _saveSettings() async {
-    if (_countController.text.isEmpty) return;
+    int newLimit = _currentLimit;
 
-    int newLimit = int.tryParse(_countController.text) ?? 10;
+    if (!_useAllWords) {
+      if (_countController.text.isEmpty) return;
 
-    // --- VALIDATION: 10 to 100 ---
-    if (newLimit < 10) newLimit = 10;
-    if (newLimit > 100) newLimit = 100;
+      newLimit = int.tryParse(_countController.text) ?? 10;
+
+      // --- VALIDATION: minimum 1, upper bound handled by quiz page ---
+      if (newLimit < 1) newLimit = 1;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('quiz_total_items', newLimit);
+    await prefs.setBool('quiz_use_all_items', _useAllWords);
     await prefs.setBool('quiz_sound_enabled', _enableSound);
     await prefs.setBool('quiz_result_sound_enabled', _enableResultSound);
     await prefs.setBool('quiz_timer_enabled', _enableCountdownTimer);
@@ -74,6 +85,74 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
     if (mounted) {
       // Pass 'true' back to the previous screen to indicate success
       Navigator.pop(context, true);
+    }
+  }
+
+  Future<int> _computeMaxAvailableItems(
+    SharedPreferences prefs,
+    String quizMode,
+  ) async {
+    final bool isIdiomQuiz =
+        quizMode == 'idiom_desc_to_idiom' ||
+        quizMode == 'idiom_to_desc' ||
+        quizMode == 'idiom_mixed';
+
+    if (isIdiomQuiz) {
+      final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+      final List<Map<String, dynamic>> allIdioms = await _dbHelper.queryAll(
+        DBHelper.tableIdioms,
+      );
+
+      if (useAllIdioms) {
+        return allIdioms.length;
+      }
+
+      final List<String> selectedIdsStr =
+          prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
+      final Set<int> selectedIds = selectedIdsStr
+          .map((s) => int.tryParse(s))
+          .whereType<int>()
+          .toSet();
+
+      if (selectedIds.isEmpty) return 0;
+
+      return allIdioms.where((item) {
+        final dynamic id = item['id'];
+        if (id is int) return selectedIds.contains(id);
+        if (id is String) {
+          final parsed = int.tryParse(id);
+          return parsed != null && selectedIds.contains(parsed);
+        }
+        return false;
+      }).length;
+    } else {
+      final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
+      final List<Map<String, dynamic>> allVocab = await _dbHelper.queryAll(
+        DBHelper.tableVocab,
+      );
+
+      if (useAllWords) {
+        return allVocab.length;
+      }
+
+      final List<String> selectedIdsStr =
+          prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
+      final Set<int> selectedIds = selectedIdsStr
+          .map((s) => int.tryParse(s))
+          .whereType<int>()
+          .toSet();
+
+      if (selectedIds.isEmpty) return 0;
+
+      return allVocab.where((item) {
+        final dynamic id = item['id'];
+        if (id is int) return selectedIds.contains(id);
+        if (id is String) {
+          final parsed = int.tryParse(id);
+          return parsed != null && selectedIds.contains(parsed);
+        }
+        return false;
+      }).length;
     }
   }
 
@@ -154,66 +233,66 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _quizMode,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                    value: 'desc_to_word',
-                    child: Text("Definition to Word (Default)"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'word_to_desc',
-                    child: Text("Word to Definition"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'word_to_synonym',
-                    child: Text("Word to Synonym"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'synonym_to_word',
-                    child: Text("Synonym to Word"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'pic_to_word',
-                    child: Text("Picture to Word"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'idiom_desc_to_idiom',
-                    child: Text("Definition to Idiom"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'idiom_to_desc',
-                    child: Text("Idiom to Definition"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'mixed',
-                    child: Text("Word & Definition (Mixed)"),
-                  ),
-                  DropdownMenuItem(
-                    value: 'mixed_with_pic',
-                    child: Text("Picture, Word & Definition (Mixed)"),
-                  ),
+          DropdownMenu<String>(
+            width: MediaQuery.of(context).size.width - 48,
+            menuHeight: 250,
+            initialSelection: _quizMode,
+            label: const Text("Quiz Mode"),
+            onSelected: (String? newValue) async {
+              if (newValue == null) return;
 
-                  DropdownMenuItem(
-                    value: 'idiom_mixed',
-                    child: Text("Idiom & Meaning (Mixed)"),
-                  ),
-                ],
-                onChanged: (String? newValue) {
-                  if (newValue != null) {
-                    setState(() => _quizMode = newValue);
-                  }
-                },
+              setState(() => _quizMode = newValue);
+
+              final prefs = await SharedPreferences.getInstance();
+              final int maxItems = await _computeMaxAvailableItems(
+                prefs,
+                newValue,
+              );
+
+              if (!mounted) return;
+              setState(() {
+                _maxAvailableItems = maxItems;
+              });
+            },
+            dropdownMenuEntries: const [
+              DropdownMenuEntry(
+                value: 'desc_to_word',
+                label: 'Definition to Word (Default)',
               ),
-            ),
+              DropdownMenuEntry(
+                value: 'word_to_desc',
+                label: 'Word to Definition',
+              ),
+              DropdownMenuEntry(
+                value: 'word_to_synonym',
+                label: 'Word to Synonym',
+              ),
+              DropdownMenuEntry(
+                value: 'synonym_to_word',
+                label: 'Synonym to Word',
+              ),
+              DropdownMenuEntry(value: 'pic_to_word', label: 'Picture to Word'),
+              DropdownMenuEntry(
+                value: 'idiom_desc_to_idiom',
+                label: 'Definition to Idiom',
+              ),
+              DropdownMenuEntry(
+                value: 'idiom_to_desc',
+                label: 'Idiom to Definition',
+              ),
+              DropdownMenuEntry(
+                value: 'mixed',
+                label: 'Word & Definition (Mixed)',
+              ),
+              DropdownMenuEntry(
+                value: 'mixed_with_pic',
+                label: 'Picture, Word & Definition (Mixed)',
+              ),
+              DropdownMenuEntry(
+                value: 'idiom_mixed',
+                label: 'Idiom & Meaning (Mixed)',
+              ),
+            ],
           ),
           const SizedBox(height: 5),
           const Text(
@@ -229,9 +308,9 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
-            "How many questions per quiz? (10 - 100)",
-            style: TextStyle(color: Colors.grey),
+          Text(
+            "How many questions per quiz? Maximum available for this quiz: $_maxAvailableItems",
+            style: const TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 15),
 
@@ -239,6 +318,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             controller: _countController,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            enabled: !_useAllWords,
             decoration: InputDecoration(
               labelText: "Number of Items",
               hintText: "e.g., 10",
@@ -246,6 +326,19 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
+          ),
+
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Use all available words/idioms"),
+            subtitle: const Text(
+              "Ignore the number above and use every stored item.",
+            ),
+            activeThumbColor: Colors.indigo,
+            value: _useAllWords,
+            onChanged: (val) {
+              setState(() => _useAllWords = val);
+            },
           ),
 
           const SizedBox(height: 20),

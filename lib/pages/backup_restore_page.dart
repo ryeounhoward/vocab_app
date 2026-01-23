@@ -4,7 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:archive/archive.dart'; // Use archive.dart for better compatibility
+import 'package:archive/archive.dart'; // Core archive types
+import 'package:archive/archive_io.dart'; // For ZipFileEncoder streaming
 import 'package:path/path.dart' as p;
 import '../database/db_helper.dart';
 
@@ -18,6 +19,8 @@ class BackupRestorePage extends StatefulWidget {
 class _BackupRestorePageState extends State<BackupRestorePage> {
   final DBHelper _dbHelper = DBHelper();
 
+  String _loadingMessage = '';
+
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -28,6 +31,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // --- Loading dialog helpers ---
   Future<void> _showLoadingDialog(String message) async {
     if (!mounted) return;
+    setState(() {
+      _loadingMessage = message;
+    });
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -47,7 +53,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Text(message, style: const TextStyle(fontSize: 14)),
+                  child: Text(
+                    _loadingMessage,
+                    style: const TextStyle(fontSize: 14),
+                  ),
                 ),
               ],
             ),
@@ -55,6 +64,21 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         );
       },
     );
+  }
+
+  void _updateLoadingMessage(String message) {
+    if (!mounted) return;
+    if (_loadingMessage == message) return;
+    setState(() {
+      _loadingMessage = message;
+    });
+  }
+
+  void _updateLoadingProgress(double fraction, String baseLabel) {
+    if (!mounted) return;
+    final double clamped = fraction.clamp(0.01, 1.0);
+    final int percent = (clamped * 100).round();
+    _updateLoadingMessage('$baseLabel ($percent%)');
   }
 
   void _hideLoadingDialog() {
@@ -214,13 +238,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(
         DBHelper.tableIdioms,
       );
+      _updateLoadingProgress(0.05, 'Exporting ZIP backup');
 
       if (vocabData.isEmpty && idiomData.isEmpty) {
         _showSnackBar("No data found to export");
         return;
       }
-
-      var archive = Archive();
 
       // Read sort-words related preferences to include in backup
       final String? quizUseAll = await _dbHelper.getPreference(
@@ -264,37 +287,74 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
       String jsonString = jsonEncode(backupPayload);
       List<int> jsonBytes = utf8.encode(jsonString);
-      archive.addFile(
-        ArchiveFile('data/backup.json', jsonBytes.length, jsonBytes),
-      );
 
-      // Add Photos from app folder to ZIP
+      _updateLoadingProgress(0.10, 'Exporting ZIP backup');
+
+      // Create a temporary ZIP on disk using a streaming encoder so
+      // the UI can update between files.
+      final tempDir = await getTemporaryDirectory();
+      final String tempZipPath = p.join(tempDir.path, 'app_full_backup.zip');
+
+      // Remove any previous temporary ZIP.
+      final tempZipFile = File(tempZipPath);
+      if (await tempZipFile.exists()) {
+        await tempZipFile.delete();
+      }
+
+      final encoder = ZipFileEncoder();
+      encoder.create(tempZipPath);
+
+      // Add the JSON backup as the first entry.
+      _updateLoadingProgress(0.15, 'Exporting ZIP backup');
+      final jsonArchiveFile = ArchiveFile(
+        'data/backup.json',
+        jsonBytes.length,
+        jsonBytes,
+      );
+      encoder.addArchiveFile(jsonArchiveFile);
+
+      // Add Photos from app folder to ZIP, with progress updates.
+      _updateLoadingProgress(0.20, 'Exporting ZIP backup');
       String imagesPath = await _getLocalImagesPath();
       Directory imgDir = Directory(imagesPath);
       if (await imgDir.exists()) {
-        List<FileSystemEntity> files = imgDir.listSync();
-        for (var file in files) {
-          if (file is File) {
-            List<int> bytes = await file.readAsBytes();
-            archive.addFile(
-              ArchiveFile(
-                'images/${p.basename(file.path)}',
-                bytes.length,
-                bytes,
-              ),
-            );
+        List<File> files = imgDir.listSync().whereType<File>().toList(
+          growable: false,
+        );
+
+        final int totalFiles = files.length;
+        int processed = 0;
+
+        for (final File file in files) {
+          processed++;
+          encoder.addFile(file);
+
+          if (totalFiles > 0) {
+            final double photoFraction = processed / totalFiles;
+            // Photos occupy the middle 70% of the progress bar.
+            final double overallFraction = 0.20 + (photoFraction * 0.70);
+            _updateLoadingProgress(overallFraction, 'Exporting ZIP backup');
           }
+
+          // Yield briefly so the UI can repaint the spinner.
+          await Future.delayed(const Duration(milliseconds: 10));
         }
       }
 
-      List<int>? zipBytes = ZipEncoder().encode(archive);
-      if (zipBytes == null) return;
+      _updateLoadingProgress(0.93, 'Exporting ZIP backup');
+      encoder.close();
 
+      _updateLoadingProgress(0.96, 'Exporting ZIP backup');
+      final List<int> zipBytes = await tempZipFile.readAsBytes();
+
+      _updateLoadingProgress(0.99, 'Exporting ZIP backup');
       await FilePicker.platform.saveFile(
         dialogTitle: 'Save Full Backup Zip:',
         fileName: 'app_full_backup.zip',
         bytes: Uint8List.fromList(zipBytes),
       );
+
+      _updateLoadingProgress(1.0, 'Exporting ZIP backup');
 
       _showSnackBar("ZIP Backup saved successfully!");
     } catch (e) {
