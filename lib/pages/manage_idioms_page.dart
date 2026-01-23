@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../database/db_helper.dart';
 import 'add_edit_idiom_page.dart';
+import 'idiom_detail_page.dart';
 
 class ManageIdiomsPage extends StatefulWidget {
   const ManageIdiomsPage({super.key});
@@ -218,16 +219,13 @@ class _ManageIdiomsPageState extends State<ManageIdiomsPage> {
                             vertical: 8,
                           ),
                           onTap: () {
-                            // 1. If another card is already scrolling, reset it first
-                            if (_activeKey != null && _activeKey != titleKey) {
-                              _activeKey?.currentState?.resetScroll();
-                            }
-
-                            // 2. Toggle scroll on the current card (handles "click again to reset")
-                            titleKey.currentState?.toggleScroll();
-
-                            // 3. Update the active key reference
-                            _activeKey = titleKey;
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    IdiomDetailPage(item: item),
+                              ),
+                            );
                           },
                           leading: ClipRRect(
                             borderRadius: BorderRadius.circular(10),

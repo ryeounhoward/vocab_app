@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
@@ -18,10 +19,15 @@ class _AboutPageState extends State<AboutPage> {
   static const String _facebookUrl = 'https://www.facebook.com/ryeounhoward23/';
   static const String _githubUrl = 'https://github.com/ryeounhoward/vocab_app';
 
+  static final DateTime _examDate = DateTime(2026, 3, 8);
+  Duration _timeLeft = Duration.zero;
+  Timer? _countdownTimer;
+
   @override
   void initState() {
     super.initState();
     _loadAppVersion();
+    _startCountdown();
   }
 
   Future<void> _loadAppVersion() async {
@@ -34,6 +40,24 @@ class _AboutPageState extends State<AboutPage> {
     } catch (_) {
       // If something goes wrong, leave version empty.
     }
+  }
+
+  void _startCountdown() {
+    void update() {
+      final now = DateTime.now();
+      final diff = _examDate.difference(now);
+      if (!mounted) return;
+      setState(() {
+        _timeLeft = diff.isNegative ? Duration.zero : diff;
+      });
+    }
+
+    update();
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (Timer timer) => update(),
+    );
   }
 
   Future<void> _openDriveLink(BuildContext context) async {
@@ -64,8 +88,49 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  Widget _buildCountdownTile(String value, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.indigo,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final versionText = _appVersion.isEmpty ? 'Loading...' : _appVersion;
+    final int days = _timeLeft.inDays;
+    final int hours = _timeLeft.inHours % 24;
+    final int minutes = _timeLeft.inMinutes % 60;
+    final int seconds = _timeLeft.inSeconds % 60;
+    final bool examReached = _timeLeft == Duration.zero;
 
     return Scaffold(
       appBar: AppBar(title: const Text('About'), centerTitle: true),
@@ -75,6 +140,46 @@ class _AboutPageState extends State<AboutPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.indigo.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Exam Countdown',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  if (examReached)
+                    const Text(
+                      'Exam day has arrived!',
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: Colors.black87,
+                      ),
+                    )
+                  else
+                    Row(
+                      children: [
+                        _buildCountdownTile('$days', 'Days'),
+                        const SizedBox(width: 8),
+                        _buildCountdownTile('$hours', 'Hours'),
+                        const SizedBox(width: 8),
+                        _buildCountdownTile('$minutes', 'Minutes'),
+                        const SizedBox(width: 8),
+                        _buildCountdownTile('$seconds', 'Seconds'),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
             const Text(
               'Disclaimer',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),

@@ -402,4 +402,24 @@ class DBHelper {
 
     await batch.commit(noResult: true);
   }
+
+  /// Add a single idiom to a specific group (no-op if already there).
+  Future<void> addIdiomToGroup(int groupId, int idiomId) async {
+    final Database dbClient = await db;
+
+    final List<Map<String, dynamic>> existing = await dbClient.query(
+      tableIdiomGroupItems,
+      columns: ['id'],
+      where: 'group_id = ? AND idiom_id = ?',
+      whereArgs: [groupId, idiomId],
+      limit: 1,
+    );
+
+    if (existing.isNotEmpty) return;
+
+    await dbClient.insert(tableIdiomGroupItems, {
+      'group_id': groupId,
+      'idiom_id': idiomId,
+    });
+  }
 }

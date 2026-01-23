@@ -322,7 +322,6 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _emptyReason = null;
 
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
-    final bool useAllItems = prefs.getBool('quiz_use_all_items') ?? false;
     // Load quiz mode and timer settings from preferences
     _quizMode = requestedMode;
 
@@ -514,22 +513,16 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     List<Map<String, dynamic>> finalQuestions = [];
 
-    allWords.shuffle();
-
-    if (useAllItems) {
-      // Use the full pool without duplicates.
-      finalQuestions = List<Map<String, dynamic>>.from(allWords);
+    if (allWords.length >= targetCount) {
+      allWords.shuffle();
+      finalQuestions = allWords.take(targetCount).toList();
     } else {
-      // Cap at the number of available items so we don't exceed
-      // the maximum words based on stored data.
-      int effectiveCount = targetCount;
-      if (effectiveCount <= 0) {
-        effectiveCount = allWords.length;
-      } else if (effectiveCount > allWords.length) {
-        effectiveCount = allWords.length;
+      finalQuestions.addAll(allWords);
+      final random = Random();
+      while (finalQuestions.length < targetCount) {
+        finalQuestions.add(allWords[random.nextInt(allWords.length)]);
       }
-
-      finalQuestions = allWords.take(effectiveCount).toList();
+      finalQuestions.shuffle();
     }
 
     _quizData = finalQuestions
@@ -939,6 +932,16 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     }
 
     await flutterTts.speak(sentence);
+  }
+
+  Future<void> _speakQuestionText(String text) async {
+    if (text.trim().isEmpty) return;
+
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
+    }
+
+    await flutterTts.speak(text);
   }
 
   void _showResultDialog() {
@@ -1457,6 +1460,19 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                 padding: const EdgeInsets.only(bottom: 15),
                 child: Column(
                   children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          tooltip: 'Speak question',
+                          icon: const Icon(
+                            Icons.volume_up,
+                            color: Colors.indigo,
+                          ),
+                          onPressed: () => _speakQuestionText(questionText),
+                        ),
+                      ],
+                    ),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(

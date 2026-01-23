@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:vocab_app/pages/vocabulary_test_page.dart';
 import 'package:workmanager/workmanager.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'services/notification_service.dart';
 // Import your pages for the main app
 import 'pages/menu_screen.dart'; // Change to your actual file path
@@ -25,6 +26,23 @@ void callbackDispatcher() {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Configure audio so short sounds can mix with other apps (e.g., Spotify)
+  AudioPlayer.global.setAudioContext(
+    AudioContext(
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.ambient,
+        options: <AVAudioSessionOptions>{AVAudioSessionOptions.mixWithOthers},
+      ),
+      android: const AudioContextAndroid(
+        isSpeakerphoneOn: false,
+        stayAwake: false,
+        contentType: AndroidContentType.sonification,
+        usageType: AndroidUsageType.notification,
+        audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+      ),
+    ),
+  );
 
   // Initialize Notification Service
   await NotificationService.init();
