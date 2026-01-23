@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../database/db_helper.dart';
 import 'add_edit_page.dart';
+import 'word_detail_page.dart';
 
 class ManageDataPage extends StatefulWidget {
   const ManageDataPage({super.key});
@@ -213,6 +214,15 @@ class _ManageDataPageState extends State<ManageDataPage> {
                         ),
                         child: ListTile(
                           onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    WordDetailPage(item: item),
+                              ),
+                            );
+                          },
+                          onLongPress: () {
                             final int itemId = item['id'];
 
                             // Retrieve or create a GlobalKey for this specific word ID
@@ -235,7 +245,7 @@ class _ManageDataPageState extends State<ManageDataPage> {
                               prevSubtitleKey?.currentState?.resetScroll();
                             }
 
-                            // 2. Toggle scroll on the current card (handles "click again to reset")
+                            // 2. Toggle scroll on the current card (handles "press again to reset")
                             titleKey.currentState?.toggleScroll();
                             subtitleKey.currentState?.toggleScroll();
 

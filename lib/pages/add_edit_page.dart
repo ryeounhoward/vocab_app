@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -8,6 +9,7 @@ import 'package:path/path.dart' as path;
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../database/db_helper.dart';
 import '../services/ai_defaults.dart';
+import 'word_groups_page.dart';
 
 class AddEditPage extends StatefulWidget {
   final Map<String, dynamic>? vocabItem;
@@ -41,6 +43,10 @@ class _AddEditPageState extends State<AddEditPage> {
   String? _imagePath;
   bool _isDownloading = false;
 
+  // Word group selection
+  List<Map<String, dynamic>> _wordGroups = [];
+  int? _selectedGroupId;
+
   final List<String> _types = [
     'Noun',
     'Verb',
@@ -58,6 +64,7 @@ class _AddEditPageState extends State<AddEditPage> {
   void initState() {
     super.initState();
     _loadGeminiSettings();
+    _loadWordGroups();
     if (widget.vocabItem != null) {
       _wordController.text = widget.vocabItem!['word'] ?? "";
       _descController.text = widget.vocabItem!['description'] ?? "";
@@ -78,6 +85,16 @@ class _AddEditPageState extends State<AddEditPage> {
             .toList();
       }
     }
+  }
+
+  Future<void> _loadWordGroups() async {
+    final groups = await dbHelper.getAllWordGroups();
+    if (!mounted) return;
+    setState(() {
+      _wordGroups = List<Map<String, dynamic>>.from(groups);
+      // For now we don't pre-select groups for existing words; user can pick one.
+      _selectedGroupId = null;
+    });
   }
 
   Future<void> _loadGeminiSettings() async {
@@ -210,6 +227,88 @@ class _AddEditPageState extends State<AddEditPage> {
     }
   }
 
+  String? _extractBetween(String source, String start, String? end) {
+    final startIndex = source.indexOf(start);
+    if (startIndex == -1) return null;
+    final contentStart = startIndex + start.length;
+
+    int endIndex;
+    if (end != null) {
+      endIndex = source.indexOf(end, contentStart);
+      if (endIndex == -1) {
+        endIndex = source.length;
+      }
+    } else {
+      endIndex = source.length;
+    }
+
+    return source.substring(contentStart, endIndex).trim();
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+
+    if (text == null || text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clipboard is empty or has no text.')),
+      );
+      return;
+    }
+
+    try {
+      final word = _extractBetween(text, 'Word:', 'Type of Speech:');
+      final type = _extractBetween(text, 'Type of Speech:', 'Meaning:');
+      final meaning = _extractBetween(text, 'Meaning:', 'Synonyms:');
+      final synonyms = _extractBetween(text, 'Synonyms:', 'Example 1:');
+      final example1 = _extractBetween(text, 'Example 1:', 'Example 2:');
+      final example2 = _extractBetween(text, 'Example 2:', 'Example 3:');
+      final example3 = _extractBetween(text, 'Example 3:', null);
+
+      if (word == null || type == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clipboard format not recognized.')),
+        );
+        return;
+      }
+
+      // Normalize type similar to AI handling
+      String rawType = type.trim();
+      String capitalizedType = rawType.isNotEmpty
+          ? "${rawType[0].toUpperCase()}${rawType.substring(1).toLowerCase()}"
+          : 'Noun';
+
+      setState(() {
+        _wordController.text = word;
+        _descController.text = meaning ?? '';
+        _synonymsController.text = synonyms ?? '';
+
+        if (_types.contains(capitalizedType)) {
+          _wordType = capitalizedType;
+        } else {
+          if (!_types.contains(capitalizedType)) {
+            _types.add(capitalizedType);
+          }
+          _wordType = capitalizedType;
+        }
+
+        _exampleControllers = [
+          TextEditingController(text: example1 ?? ''),
+          TextEditingController(text: example2 ?? ''),
+          TextEditingController(text: example3 ?? ''),
+        ];
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Text pasted into fields successfully.')),
+      );
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to parse clipboard text.')),
+      );
+    }
+  }
+
   // --- Helper methods (Saving, Picking Image, etc.) remain the same as your code ---
   Future<String?> _downloadImage(String url) async {
     try {
@@ -272,10 +371,17 @@ class _AddEditPageState extends State<AddEditPage> {
         'word_type': _wordType,
         'image_path': _imagePath,
       };
+      int wordId;
       if (widget.vocabItem == null) {
-        await dbHelper.insert(data);
+        wordId = await dbHelper.insert(data);
       } else {
-        await dbHelper.update({'id': widget.vocabItem!['id'], ...data});
+        wordId = widget.vocabItem!['id'] as int;
+        await dbHelper.update({'id': wordId, ...data});
+      }
+
+      // If a group is chosen, add this word to that group.
+      if (_selectedGroupId != null) {
+        await dbHelper.addWordToGroup(_selectedGroupId!, wordId);
       }
       Navigator.pop(context);
     }
@@ -348,12 +454,60 @@ class _AddEditPageState extends State<AddEditPage> {
                 ),
                 const SizedBox(height: 20),
                 const Text(
+                  "Word Group",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                // Create / manage word groups button (same style as Gallery)
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const WordGroupsPage(),
+                      ),
+                    );
+                    await _loadWordGroups();
+                  },
+                  icon: const Icon(Icons.group_add),
+                  label: const Text('Create or manage word groups'),
+                ),
+                const SizedBox(height: 10),
+                // Word group dropdown (same style as Word Type)
+                if (_wordGroups.isNotEmpty) ...[
+                  DropdownMenu<int?>(
+                    width: MediaQuery.of(context).size.width - 32,
+                    menuHeight: 250,
+                    initialSelection: _selectedGroupId,
+                    label: const Text('Word Group (optional)'),
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedGroupId = value;
+                      });
+                    },
+                    dropdownMenuEntries: [
+                      const DropdownMenuEntry<int?>(
+                        value: null,
+                        label: 'No group',
+                      ),
+                      ..._wordGroups.map(
+                        (g) => DropdownMenuEntry<int?>(
+                          value: g['id'] as int?,
+                          label: (g['name'] ?? '').toString(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 10),
+                const Text(
                   "Word Details",
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const SizedBox(height: 10),
 
-                // WORD + AI BUTTON
+                // WORD + PASTE + AI BUTTONS
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -362,6 +516,28 @@ class _AddEditPageState extends State<AddEditPage> {
                         controller: _wordController,
                         decoration: _inputStyle("Word"),
                         validator: (v) => v!.isEmpty ? "Required" : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 56, // match TextFormField default height
+                      width: 56,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          foregroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          elevation: 0,
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: _pasteFromClipboard,
+                        child: Image.asset(
+                          'assets/images/paste-button-1.png',
+                          fit: BoxFit.contain,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -404,7 +580,7 @@ class _AddEditPageState extends State<AddEditPage> {
                   width: MediaQuery.of(context).size.width - 32,
                   menuHeight: 250,
                   initialSelection: _wordType,
-                  label: const Text("Word Type"),
+                  label: const Text("Type of Speech"),
                   onSelected: (value) async {
                     if (value == _addNewTypeLabel) {
                       final newType = await _showAddWordTypeDialog();
@@ -435,7 +611,7 @@ class _AddEditPageState extends State<AddEditPage> {
                 TextFormField(
                   controller: _descController,
                   maxLines: 4,
-                  decoration: _inputStyle("Description (Meaning)"),
+                  decoration: _inputStyle("Definition"),
                 ),
                 const SizedBox(height: 15),
                 TextFormField(

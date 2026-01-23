@@ -319,6 +319,26 @@ class DBHelper {
     await batch.commit(noResult: true);
   }
 
+  /// Add a single vocabulary word to a specific group (no-op if already there).
+  Future<void> addWordToGroup(int groupId, int wordId) async {
+    final Database dbClient = await db;
+
+    final List<Map<String, dynamic>> existing = await dbClient.query(
+      tableWordGroupItems,
+      columns: ['id'],
+      where: 'group_id = ? AND word_id = ?',
+      whereArgs: [groupId, wordId],
+      limit: 1,
+    );
+
+    if (existing.isNotEmpty) return;
+
+    await dbClient.insert(tableWordGroupItems, {
+      'group_id': groupId,
+      'word_id': wordId,
+    });
+  }
+
   // --- IDIOM GROUP HELPERS ---
 
   Future<List<Map<String, dynamic>>> getAllIdiomGroups() async {

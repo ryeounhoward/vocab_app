@@ -220,7 +220,7 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
@@ -239,6 +239,7 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 50),
                 ],
               ),
             ),
