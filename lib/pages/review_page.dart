@@ -63,11 +63,17 @@ class _ReviewPageState extends State<ReviewPage> {
         .map((s) => int.tryParse(s))
         .whereType<int>()
         .toSet();
+    final int? groupId = prefs.getInt('quiz_selected_word_group_id');
 
     // Apply inclusion filter (if user chose specific words).
     // If "use all" is OFF and nothing is selected, return an empty list.
     List<Map<String, dynamic>> filteredData;
-    if (useAllWords) {
+    if (groupId != null) {
+      final Set<int> groupIds = await dbHelper.getWordIdsForGroup(groupId);
+      filteredData = data
+          .where((item) => groupIds.contains(item['id'] as int? ?? -1))
+          .toList();
+    } else if (useAllWords) {
       filteredData = List<Map<String, dynamic>>.from(data);
     } else if (selectedIds.isNotEmpty) {
       filteredData = data
@@ -105,7 +111,19 @@ class _ReviewPageState extends State<ReviewPage> {
       targetIndex = orderedData.indexWhere(
         (item) => item['id'] == widget.selectedId,
       );
-      if (targetIndex == -1) targetIndex = 0;
+
+      if (targetIndex == -1) {
+        final fallback = data.firstWhere(
+          (item) => item['id'] == widget.selectedId,
+          orElse: () => <String, dynamic>{},
+        );
+        if (fallback.isNotEmpty) {
+          orderedData.insert(0, Map<String, dynamic>.from(fallback));
+          targetIndex = 0;
+        } else {
+          targetIndex = 0;
+        }
+      }
     }
 
     setState(() {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:vocab_app/pages/vocabulary_test_page.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -28,29 +29,34 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Configure audio so short sounds can mix with other apps (e.g., Spotify)
-  AudioPlayer.global.setAudioContext(
-    AudioContext(
-      iOS: AudioContextIOS(
-        category: AVAudioSessionCategory.ambient,
-        options: <AVAudioSessionOptions>{AVAudioSessionOptions.mixWithOthers},
+  if (!kIsWeb) {
+    AudioPlayer.global.setAudioContext(
+      AudioContext(
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: <AVAudioSessionOptions>{AVAudioSessionOptions.mixWithOthers},
+        ),
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: false,
+          stayAwake: false,
+          contentType: AndroidContentType.sonification,
+          usageType: AndroidUsageType.notification,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
       ),
-      android: const AudioContextAndroid(
-        isSpeakerphoneOn: false,
-        stayAwake: false,
-        contentType: AndroidContentType.sonification,
-        usageType: AndroidUsageType.notification,
-        audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-      ),
-    ),
-  );
+    );
+  }
 
-  // Initialize Notification Service
-  await NotificationService.init();
-
-  // Initialize Workmanager
-  Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
-
+  // Start UI first to avoid blocking first frame on startup
   runApp(const MyApp());
+
+  // Initialize services in background to prevent splash freeze
+  _initBackgroundServices();
+}
+
+Future<void> _initBackgroundServices() async {
+  await NotificationService.init();
+  Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
 }
 
 class MyApp extends StatelessWidget {

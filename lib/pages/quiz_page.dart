@@ -95,8 +95,14 @@ class _QuizPageState extends State<QuizPage> {
           .map((s) => int.tryParse(s))
           .whereType<int>()
           .toSet();
+      final int? groupId = prefs.getInt('quiz_selected_word_group_id');
 
-      if (useAllWords) {
+      if (groupId != null) {
+        final Set<int> groupIds = await dbHelper.getWordIdsForGroup(groupId);
+        filteredData = data
+            .where((item) => groupIds.contains(item['id'] as int? ?? -1))
+            .toList();
+      } else if (useAllWords) {
         filteredData = List<Map<String, dynamic>>.from(data);
       } else if (selectedIds.isNotEmpty) {
         filteredData = data
@@ -114,8 +120,14 @@ class _QuizPageState extends State<QuizPage> {
           .map((s) => int.tryParse(s))
           .whereType<int>()
           .toSet();
+      final int? groupId = prefs.getInt('quiz_selected_idiom_group_id');
 
-      if (useAllIdioms) {
+      if (groupId != null) {
+        final Set<int> groupIds = await dbHelper.getIdiomIdsForGroup(groupId);
+        filteredData = data
+            .where((item) => groupIds.contains(item['id'] as int? ?? -1))
+            .toList();
+      } else if (useAllIdioms) {
         filteredData = List<Map<String, dynamic>>.from(data);
       } else if (selectedIds.isNotEmpty) {
         filteredData = data

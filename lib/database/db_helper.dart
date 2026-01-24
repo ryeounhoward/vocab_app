@@ -319,6 +319,47 @@ class DBHelper {
     await batch.commit(noResult: true);
   }
 
+  /// Returns a mapping of word_id -> list of group maps {id, name}.
+  /// Useful for showing multiple groups for a single word.
+  Future<Map<int, List<Map<String, dynamic>>>> getWordGroupsForWordIds(
+    Set<int> wordIds,
+  ) async {
+    if (wordIds.isEmpty) return <int, List<Map<String, dynamic>>>{};
+
+    final Database dbClient = await db;
+    final List<int> ids = wordIds.toList();
+    final String placeholders = List.filled(ids.length, '?').join(',');
+
+    final List<Map<String, Object?>> rows = await dbClient.rawQuery('''
+      SELECT
+        wgi.word_id AS item_id,
+        wg.id AS group_id,
+        wg.name AS group_name
+      FROM $tableWordGroupItems wgi
+      JOIN $tableWordGroups wg ON wg.id = wgi.group_id
+      WHERE wgi.word_id IN ($placeholders)
+      ORDER BY wg.name COLLATE NOCASE ASC
+    ''', ids);
+
+    final Map<int, List<Map<String, dynamic>>> result =
+        <int, List<Map<String, dynamic>>>{};
+
+    for (final row in rows) {
+      final int? itemId = row['item_id'] as int?;
+      final int? groupId = row['group_id'] as int?;
+      final String name = (row['group_name'] ?? '').toString().trim();
+
+      if (itemId == null || groupId == null || name.isEmpty) continue;
+
+      result.putIfAbsent(itemId, () => <Map<String, dynamic>>[]).add({
+        'id': groupId,
+        'name': name,
+      });
+    }
+
+    return result;
+  }
+
   /// Add a single vocabulary word to a specific group (no-op if already there).
   Future<void> addWordToGroup(int groupId, int wordId) async {
     final Database dbClient = await db;
@@ -401,6 +442,47 @@ class DBHelper {
     }
 
     await batch.commit(noResult: true);
+  }
+
+  /// Returns a mapping of idiom_id -> list of group maps {id, name}.
+  /// Useful for showing multiple groups for a single idiom.
+  Future<Map<int, List<Map<String, dynamic>>>> getIdiomGroupsForIdiomIds(
+    Set<int> idiomIds,
+  ) async {
+    if (idiomIds.isEmpty) return <int, List<Map<String, dynamic>>>{};
+
+    final Database dbClient = await db;
+    final List<int> ids = idiomIds.toList();
+    final String placeholders = List.filled(ids.length, '?').join(',');
+
+    final List<Map<String, Object?>> rows = await dbClient.rawQuery('''
+      SELECT
+        igi.idiom_id AS item_id,
+        ig.id AS group_id,
+        ig.name AS group_name
+      FROM $tableIdiomGroupItems igi
+      JOIN $tableIdiomGroups ig ON ig.id = igi.group_id
+      WHERE igi.idiom_id IN ($placeholders)
+      ORDER BY ig.name COLLATE NOCASE ASC
+    ''', ids);
+
+    final Map<int, List<Map<String, dynamic>>> result =
+        <int, List<Map<String, dynamic>>>{};
+
+    for (final row in rows) {
+      final int? itemId = row['item_id'] as int?;
+      final int? groupId = row['group_id'] as int?;
+      final String name = (row['group_name'] ?? '').toString().trim();
+
+      if (itemId == null || groupId == null || name.isEmpty) continue;
+
+      result.putIfAbsent(itemId, () => <Map<String, dynamic>>[]).add({
+        'id': groupId,
+        'name': name,
+      });
+    }
+
+    return result;
   }
 
   /// Add a single idiom to a specific group (no-op if already there).

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart'; // Core archive types
 import 'package:archive/archive_io.dart'; // For ZipFileEncoder streaming
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 
 class BackupRestorePage extends StatefulWidget {
@@ -285,6 +286,17 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         backupPayload['sort_word_settings'] = sortWordSettings;
       }
 
+      // Include quiz history from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final String? quizHistory = prefs.getString('quiz_history');
+      final int? quizHistoryNext = prefs.getInt('quiz_history_next_number');
+      if (quizHistory != null) {
+        backupPayload['quiz_history'] = quizHistory;
+      }
+      if (quizHistoryNext != null) {
+        backupPayload['quiz_history_next_number'] = quizHistoryNext;
+      }
+
       String jsonString = jsonEncode(backupPayload);
       List<int> jsonBytes = utf8.encode(jsonString);
 
@@ -424,6 +436,21 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           );
         }
 
+        // Optional: restore quiz history if present in backup
+        String? quizHistory;
+        int? quizHistoryNext;
+        if (jsonData is Map && jsonData['quiz_history'] != null) {
+          quizHistory = jsonData['quiz_history'].toString();
+        }
+        if (jsonData is Map && jsonData['quiz_history_next_number'] != null) {
+          final dynamic rawNext = jsonData['quiz_history_next_number'];
+          if (rawNext is int) {
+            quizHistoryNext = rawNext;
+          } else {
+            quizHistoryNext = int.tryParse(rawNext.toString());
+          }
+        }
+
         bool? confirm = await showDialog(
           context: context,
           builder: (context) => AlertDialog(
@@ -465,6 +492,14 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                   'quiz_selected_word_group_id',
                   sortWordSettings['quiz_selected_word_group_id'].toString(),
                 );
+              }
+            }
+
+            if (quizHistory != null) {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('quiz_history', quizHistory);
+              if (quizHistoryNext != null) {
+                await prefs.setInt('quiz_history_next_number', quizHistoryNext);
               }
             }
 

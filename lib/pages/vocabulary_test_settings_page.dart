@@ -37,7 +37,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
 
     setState(() {
       _currentLimit = prefs.getInt('quiz_total_items') ?? 10;
-      _useAllWords = prefs.getBool('quiz_use_all_items') ?? false;
+      _useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
       _enableSound = prefs.getBool('quiz_sound_enabled') ?? true;
       _enableResultSound = prefs.getBool('quiz_result_sound_enabled') ?? true;
       bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
@@ -70,7 +70,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('quiz_total_items', newLimit);
-    await prefs.setBool('quiz_use_all_items', _useAllWords);
+    await prefs.setBool('quiz_use_all_words', _useAllWords);
     await prefs.setBool('quiz_sound_enabled', _enableSound);
     await prefs.setBool('quiz_result_sound_enabled', _enableResultSound);
     await prefs.setBool('quiz_timer_enabled', _enableCountdownTimer);
@@ -130,9 +130,15 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
       final List<Map<String, dynamic>> allVocab = await _dbHelper.queryAll(
         DBHelper.tableVocab,
       );
+      final bool isSentenceQuiz = quizMode == 'sentence_to_word';
 
       if (useAllWords) {
-        return allVocab.length;
+        if (!isSentenceQuiz) return allVocab.length;
+
+        return allVocab.where((item) {
+          final raw = (item['examples'] ?? '').toString().trim();
+          return raw.isNotEmpty;
+        }).length;
       }
 
       final List<String> selectedIdsStr =
@@ -152,6 +158,10 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
           return parsed != null && selectedIds.contains(parsed);
         }
         return false;
+      }).where((item) {
+        if (!isSentenceQuiz) return true;
+        final raw = (item['examples'] ?? '').toString().trim();
+        return raw.isNotEmpty;
       }).length;
     }
   }
@@ -271,6 +281,10 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
                 value: 'synonym_to_word',
                 label: 'Synonym to Word',
               ),
+              DropdownMenuEntry(
+                value: 'sentence_to_word',
+                label: 'Sentence to Word',
+              ),
               DropdownMenuEntry(value: 'pic_to_word', label: 'Picture to Word'),
               DropdownMenuEntry(
                 value: 'idiom_desc_to_idiom',
@@ -309,7 +323,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            "How many questions per quiz? Maximum available for this quiz: $_maxAvailableItems",
+            "How many questions per quiz?",
             style: const TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 15),
@@ -321,7 +335,7 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
             enabled: !_useAllWords,
             decoration: InputDecoration(
               labelText: "Number of Items",
-              hintText: "e.g., 10",
+              hintText: "10 - $_maxAvailableItems",
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -330,9 +344,11 @@ class _QuizSettingsPageState extends State<QuizSettingsPage> {
 
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text("Use all available words/idioms"),
-            subtitle: const Text(
-              "Ignore the number above and use every stored item.",
+            title: Text(
+              "Use all ${_quizMode.startsWith('idiom') ? 'idioms' : 'words'}",
+            ),
+            subtitle: Text(
+              "Ignore the number above and use $_maxAvailableItems ${_quizMode.startsWith('idiom') ? 'idioms' : 'words'}.",
             ),
             activeThumbColor: Colors.indigo,
             value: _useAllWords,

@@ -1,11 +1,66 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vocab_app/pages/idiom_review_page.dart';
 import 'package:vocab_app/pages/review_page.dart';
 
-class MenuPage extends StatelessWidget {
+import '../database/db_helper.dart';
+
+class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
 
   @override
+  State<MenuPage> createState() => _MenuPageState();
+}
+
+class _MenuPageState extends State<MenuPage> {
+  final DBHelper _dbHelper = DBHelper();
+  String? _wordGroupName;
+  String? _idiomGroupName;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSelectedGroups();
+  }
+
+  Future<void> _loadSelectedGroups() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
+    final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+
+    final int? wordGroupId = prefs.getInt('quiz_selected_word_group_id');
+    final int? idiomGroupId = prefs.getInt('quiz_selected_idiom_group_id');
+
+    String? wordName;
+    if (!useAllWords && wordGroupId != null) {
+      final groups = await _dbHelper.getAllWordGroups();
+      final group = groups.firstWhere(
+        (g) => g['id'] == wordGroupId,
+        orElse: () => <String, dynamic>{},
+      );
+      final name = (group['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) wordName = name;
+    }
+
+    String? idiomName;
+    if (!useAllIdioms && idiomGroupId != null) {
+      final groups = await _dbHelper.getAllIdiomGroups();
+      final group = groups.firstWhere(
+        (g) => g['id'] == idiomGroupId,
+        orElse: () => <String, dynamic>{},
+      );
+      final name = (group['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) idiomName = name;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _wordGroupName = wordName;
+      _idiomGroupName = idiomName;
+    });
+  }
+
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
@@ -24,6 +79,7 @@ class MenuPage extends StatelessWidget {
                     height: cardHeight,
                     child: MenuCard(
                       title: "Words",
+                      subtitle: _wordGroupName,
                       imagePath: "assets/images/vocabulary.jpg",
                       color: Colors.blueAccent,
                       onTap: () {
@@ -42,6 +98,7 @@ class MenuPage extends StatelessWidget {
                     height: cardHeight,
                     child: MenuCard(
                       title: "Idioms",
+                      subtitle: _idiomGroupName,
                       imagePath: "assets/images/idioms.jpg",
                       color: Colors.orangeAccent,
                       onTap: () {
@@ -84,12 +141,14 @@ class MenuPage extends StatelessWidget {
 
 class MenuCard extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final String imagePath;
   final Color color;
   final VoidCallback onTap;
 
   const MenuCard({
     required this.title,
+    this.subtitle,
     required this.imagePath,
     required this.color,
     required this.onTap,
@@ -123,14 +182,31 @@ class MenuCard extends StatelessWidget {
               Container(color: Colors.black.withOpacity(0.4)),
               // Title Text
               Center(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      Text(
+                        '(${subtitle!.trim()})',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],

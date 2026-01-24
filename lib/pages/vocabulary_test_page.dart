@@ -1,11 +1,13 @@
 import 'dart:math';
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
+import 'quiz_history_page.dart';
 
 class VocabularyTestPage extends StatefulWidget {
   const VocabularyTestPage({super.key});
@@ -35,6 +37,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   int _elapsedSeconds = 0; // for duration/count-up
   Timer? _timer;
   DateTime? _quizStartTime;
+  DateTime? _questionStartTime;
   int _answeredCount = 0;
   bool _timeOver = false;
 
@@ -70,6 +73,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   static int _cachedElapsedSeconds = 0;
   static int _cachedAnsweredCount = 0;
   static String? _cachedQuizMode;
+  static String? _cachedSelectionSignature;
 
   static int _cachedHintPoints = 0;
 
@@ -77,6 +81,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   String? _pictureHint;
   List<String> _revealedHints = [];
   String? _emptyReason; // tracks why the quiz has no data
+  String? _selectionSignature;
+
+  // Quiz history (only for desc_to_word / word_to_desc)
+  final List<Map<String, dynamic>> _historyItems = [];
+  bool _historySavedForCurrentQuiz = false;
+  Map<String, dynamic>? _lastSavedHistoryItem;
 
   String _getFeedbackMessage() {
     if (_quizData.isEmpty) return "";
@@ -101,6 +111,27 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     super.initState();
     _initTts();
     _initQuizPage();
+  }
+
+  String _buildSelectionSignature(SharedPreferences prefs, String mode) {
+    final bool isIdiomQuiz =
+        mode == 'idiom_desc_to_idiom' ||
+        mode == 'idiom_to_desc' ||
+        mode == 'idiom_mixed';
+
+    if (isIdiomQuiz) {
+      final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+      final List<String> selectedIds =
+          prefs.getStringList('quiz_selected_idiom_ids') ?? const <String>[];
+      final int? groupId = prefs.getInt('quiz_selected_idiom_group_id');
+      return 'idioms:$useAllIdioms:${groupId ?? 'none'}:${selectedIds.join(',')}';
+    }
+
+    final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
+    final List<String> selectedIds =
+        prefs.getStringList('quiz_selected_word_ids') ?? const <String>[];
+    final int? groupId = prefs.getInt('quiz_selected_word_group_id');
+    return 'words:$useAllWords:${groupId ?? 'none'}:${selectedIds.join(',')}';
   }
 
   @override
@@ -219,14 +250,17 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   Future<void> _initQuizPage() async {
     final prefs = await SharedPreferences.getInstance();
     final String mode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+    final String signature = _buildSelectionSignature(prefs, mode);
 
     // Restore only if we have a cached quiz with the same mode
     if (_cachedQuizData != null &&
         _cachedQuizData!.isNotEmpty &&
         _cachedQuizMode == mode &&
+        _cachedSelectionSignature == signature &&
         !_cachedTimeOver) {
       setState(() {
         _quizMode = mode;
+        _selectionSignature = signature;
         _quizData = _cachedQuizData!;
         _allWordsPool = _cachedAllWordsPool ?? [];
         _questionModes = List<String>.from(_cachedQuestionModes);
@@ -248,6 +282,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _quizStartTime = DateTime.now().subtract(
           Duration(seconds: _elapsedSeconds),
         );
+        _questionStartTime = DateTime.now();
       });
 
       _startRestoredTimer();
@@ -320,10 +355,13 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _answeredCount = 0;
     _elapsedSeconds = 0;
     _emptyReason = null;
+    _historyItems.clear();
+    _historySavedForCurrentQuiz = false;
 
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
     // Load quiz mode and timer settings from preferences
     _quizMode = requestedMode;
+    _selectionSignature = _buildSelectionSignature(prefs, requestedMode);
 
     bool countdown = prefs.getBool('quiz_timer_enabled') ?? false;
     bool duration = prefs.getBool('quiz_duration_timer_enabled') ?? !countdown;
@@ -347,7 +385,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     // Decide which table to use based on quiz mode
     final bool isSynonymQuiz =
-        _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
+      _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
+    final bool isSentenceQuiz = _quizMode == 'sentence_to_word';
 
     List<Map<String, dynamic>> rawData;
     if (!forceReload) {
@@ -499,6 +538,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         });
         return;
       }
+    } else if (isSentenceQuiz) {
+      // For sentence quiz mode:
+      // - Questions must have at least one example sentence.
+      // - Options can include all vocab words for distractors.
+      final List<Map<String, dynamic>> optionsPool = allWords.where((w) {
+        final String word = (w['word'] ?? '').toString().trim();
+        return word.isNotEmpty;
+      }).toList();
+
+      final List<Map<String, dynamic>> sentenceQuestions = allWords.where((w) {
+        final String word = (w['word'] ?? '').toString().trim();
+        if (word.isEmpty) return false;
+        return _parseExamples(w['examples']).isNotEmpty;
+      }).toList();
+
+      _allWordsPool = optionsPool;
+      allWords = sentenceQuestions;
+
+      if (allWords.isEmpty) {
+        setState(() {
+          _quizData = [];
+          _isLoading = false;
+        });
+        return;
+      }
     } else {
       _allWordsPool = allWords;
 
@@ -574,6 +638,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       _revealedHints = [];
       _generateOptionsForCurrentQuestion(_allWordsPool);
       _quizStartTime = DateTime.now();
+      _questionStartTime = DateTime.now();
       _elapsedSeconds = 0;
 
       // Start timer if either countdown or duration timer is enabled
@@ -635,6 +700,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _cachedAnsweredCount = _answeredCount;
     _cachedHintPoints = _hintPoints;
     _cachedQuizMode = _quizMode;
+    _cachedSelectionSignature = _selectionSignature;
   }
 
   void _generateOptionsForCurrentQuestion(List<Map<String, dynamic>> pool) {
@@ -751,6 +817,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
       // Fallback (should be rare): compute one on the fly
       return _getRandomSynonym(currentQuestion);
+    } else if (currentMode == 'sentence_to_word') {
+      return (currentQuestion['word'] ?? '').toString();
     } else {
       final String key = currentMode.startsWith('idiom') ? 'idiom' : 'word';
       return (currentQuestion[key] ?? '').toString();
@@ -768,6 +836,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     final correctAnswer = _getCorrectAnswerForCurrentQuestion();
     final bool isCorrect =
         userAnswer.toLowerCase() == correctAnswer.toLowerCase().trim();
+
+    _recordAnswerHistory(isCorrect);
 
     _playSound(isCorrect);
 
@@ -787,6 +857,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     String correctAnswer = _getCorrectAnswerForCurrentQuestion();
     bool isCorrect = (answer == correctAnswer);
+
+    _recordAnswerHistory(isCorrect);
 
     // Play sound immediately
     _playSound(isCorrect);
@@ -820,6 +892,63 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     return parts.toSet().toList();
   }
 
+  List<String> _parseExamples(dynamic rawValue) {
+    final raw = (rawValue as String? ?? '').trim();
+    if (raw.isEmpty) return const [];
+
+    final parts = raw
+        .split(RegExp(r'[\n]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (parts.isEmpty) return const [];
+    return parts;
+  }
+
+  String _maskWordInSentence(String sentence, String word) {
+    final trimmedWord = word.trim();
+    if (trimmedWord.isEmpty) return sentence;
+
+    final pattern = RegExp(
+      r'\b' + RegExp.escape(trimmedWord) + r'\b',
+      caseSensitive: false,
+    );
+
+    if (!pattern.hasMatch(sentence)) return sentence;
+
+    return sentence.replaceAllMapped(pattern, (match) {
+      final int len = match.group(0)?.length ?? trimmedWord.length;
+      return '_' * len;
+    });
+  }
+
+  String _getSentencePrompt(Map<String, dynamic> item) {
+    final cached = (item['_sentencePrompt'] as String? ?? '').trim();
+    if (cached.isNotEmpty) return cached;
+
+    final String word = (item['word'] ?? '').toString();
+    final examples = _parseExamples(item['examples']);
+    if (examples.isEmpty) return '';
+
+    examples.shuffle();
+    final int takeCount = min(3, examples.length);
+    final List<String> selected = examples.take(takeCount).toList();
+
+    String chosen = selected.first;
+    for (final s in selected) {
+      if (RegExp(r'\b' + RegExp.escape(word) + r'\b', caseSensitive: false)
+          .hasMatch(s)) {
+        chosen = s;
+        break;
+      }
+    }
+
+    final masked = _maskWordInSentence(chosen, word);
+    item['_sentencePrompt'] = masked;
+    return masked;
+  }
+
   List<String> _getAllSynonyms(Map<String, dynamic> item) {
     return _parseSynonyms(item['synonyms']);
   }
@@ -844,12 +973,103 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _answerController.clear();
         _pictureHint = null;
         _revealedHints = [];
+        _questionStartTime = DateTime.now();
       });
     } else {
       // Finished all questions before timer expired
       _timer?.cancel();
       _showResultDialog();
     }
+  }
+
+  bool _isHistoryEligibleMode(String mode) {
+    return mode == 'desc_to_word' ||
+        mode == 'word_to_desc' ||
+        mode == 'sentence_to_word';
+  }
+
+  int _getCurrentQuestionDurationSeconds() {
+    if (_questionStartTime == null) return 0;
+    final int seconds = DateTime.now()
+        .difference(_questionStartTime!)
+        .inSeconds;
+    return seconds < 0 ? 0 : seconds;
+  }
+
+  Map<String, dynamic> _buildWordSnapshot(Map<String, dynamic> item) {
+    return {
+      'id': item['id'],
+      'word': item['word'],
+      'description': item['description'],
+      'examples': item['examples'],
+      'word_type': item['word_type'],
+      'image_path': item['image_path'],
+      'synonyms': item['synonyms'],
+      'is_favorite': item['is_favorite'],
+    };
+  }
+
+  void _recordAnswerHistory(bool isCorrect) {
+    if (!_isHistoryEligibleMode(_quizMode)) return;
+
+    final String currentMode = _questionModes.isNotEmpty
+        ? _questionModes[_currentIndex]
+        : _quizMode;
+
+    if (!_isHistoryEligibleMode(currentMode)) return;
+
+    if (_quizData.isEmpty) return;
+    final currentQuestion = _quizData[_currentIndex];
+
+    _historyItems.add({
+      'wordId': currentQuestion['id'],
+      'word': (currentQuestion['word'] ?? '').toString(),
+      'isCorrect': isCorrect,
+      'durationSeconds': _getCurrentQuestionDurationSeconds(),
+      'wordData': _buildWordSnapshot(currentQuestion),
+    });
+  }
+
+  int _getQuizElapsedSeconds() {
+    if (_elapsedSeconds > 0) return _elapsedSeconds;
+    if (_quizStartTime == null) return 0;
+    final int seconds = DateTime.now().difference(_quizStartTime!).inSeconds;
+    if (_isCountdownTimerEnabled && _totalDurationSeconds > 0) {
+      return seconds.clamp(0, _totalDurationSeconds);
+    }
+    return seconds < 0 ? 0 : seconds;
+  }
+
+  Future<void> _saveQuizHistoryIfEligible() async {
+    if (_historySavedForCurrentQuiz) return;
+    if (!_isHistoryEligibleMode(_quizMode)) return;
+    if (_quizData.isEmpty) return;
+    if (_historyItems.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final String raw = prefs.getString('quiz_history') ?? '[]';
+    final List<dynamic> decoded = jsonDecode(raw) as List<dynamic>;
+    final List<Map<String, dynamic>> history = decoded
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    final int nextNumber = (prefs.getInt('quiz_history_next_number') ?? 1);
+
+    final Map<String, dynamic> historyItem = {
+      'quizNumber': nextNumber,
+      'date': DateTime.now().toIso8601String(),
+      'quizMode': _quizMode,
+      'durationSeconds': _getQuizElapsedSeconds(),
+      'totalItems': _quizData.length,
+      'items': List<Map<String, dynamic>>.from(_historyItems),
+    };
+
+    history.add(historyItem);
+
+    await prefs.setString('quiz_history', jsonEncode(history));
+    await prefs.setInt('quiz_history_next_number', nextNumber + 1);
+    _historySavedForCurrentQuiz = true;
+    _lastSavedHistoryItem = historyItem;
   }
 
   void _handleTimeUp() {
@@ -945,6 +1165,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   }
 
   void _showResultDialog() {
+    _saveQuizHistoryIfEligible();
     String feedback = _getFeedbackMessage();
 
     Color feedbackColor = (_score / _quizData.length) >= 0.7
@@ -1034,26 +1255,72 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           ],
         ),
         actionsAlignment: MainAxisAlignment.center,
-        actionsPadding: const EdgeInsets.only(bottom: 24),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
         actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _generateQuizFresh();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.indigo,
-              foregroundColor: Colors.white,
-              elevation: 2,
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_isHistoryEligibleMode(_quizMode))
+                OutlinedButton(
+                  onPressed: () async {
+                    await _saveQuizHistoryIfEligible();
+                    final item = _lastSavedHistoryItem;
+                    if (item == null || !context.mounted) return;
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            QuizHistoryDetailPage(historyItem: item),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    side: BorderSide(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 1.5,
+                    ),
+                    minimumSize: const Size.fromHeight(50),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 40,
+                      vertical: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'VIEW HISTORY',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              if (_isHistoryEligibleMode(_quizMode)) const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _generateQuizFresh();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  elevation: 2,
+                  minimumSize: const Size.fromHeight(50),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40,
+                    vertical: 15,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text(
+                  'QUIZ AGAIN',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            child: const Text(
-              "QUIZ AGAIN",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            ],
           ),
         ],
       ),
@@ -1061,6 +1328,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   }
 
   void _showTimeUpDialog() {
+    _saveQuizHistoryIfEligible();
     if (_quizData.isEmpty) return;
 
     final int totalItems = _quizData.length;
@@ -1096,20 +1364,72 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           ],
         ),
         actionsAlignment: MainAxisAlignment.center,
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
         actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _generateQuizFresh();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.indigo,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text(
-              'QUIZ AGAIN',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_isHistoryEligibleMode(_quizMode))
+                OutlinedButton(
+                  onPressed: () async {
+                    await _saveQuizHistoryIfEligible();
+                    final item = _lastSavedHistoryItem;
+                    if (item == null || !context.mounted) return;
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            QuizHistoryDetailPage(historyItem: item),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    side: BorderSide(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 1.5,
+                    ),
+                    minimumSize: const Size.fromHeight(50),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 40,
+                      vertical: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'VIEW HISTORY',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              if (_isHistoryEligibleMode(_quizMode)) const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _generateQuizFresh();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  elevation: 2,
+                  minimumSize: const Size.fromHeight(50),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40,
+                    vertical: 15,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text(
+                  'QUIZ AGAIN',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1135,6 +1455,18 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         title: const Text("Vocabulary Quiz"),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Quiz history',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const QuizHistoryPage(),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.restart_alt),
             tooltip: 'Restart quiz',
@@ -1168,6 +1500,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
             ? "You need at least 4 idioms in your idiom list to start a quiz."
             : (_quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word')
             ? "You need at least 1 word with synonyms in your vocabulary list to start this quiz."
+        : _quizMode == 'sentence_to_word'
+        ? "You need at least 1 word with example sentences in your vocabulary list to start this quiz."
             : "You need at least 4 words in your vocabulary list to start a quiz.";
       }
 
@@ -1201,6 +1535,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     } else if (currentMode == 'word_to_synonym') {
       // In this mode the prompt should be the word itself.
       questionText = (currentQuestion['word'] ?? 'No Word').toString();
+    } else if (currentMode == 'sentence_to_word') {
+      final String prompt = _getSentencePrompt(currentQuestion);
+      questionText = prompt.isNotEmpty
+          ? prompt
+          : 'No example sentence available for this word.';
     } else if (currentMode == 'synonym_to_word') {
       // Show one synonym as the question; cache it so it stays stable
       String promptSynonym =
@@ -1494,6 +1833,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                 ? 'WHAT DOES THIS WORD MEAN?'
                                 : currentMode == 'word_to_synonym'
                                 ? 'WHICH SYNONYM MATCHES THIS WORD?'
+                              : currentMode == 'sentence_to_word'
+                              ? 'WHICH WORD COMPLETES THIS SENTENCE?'
                                 : currentMode == 'synonym_to_word'
                                 ? 'WHICH WORD MATCHES THIS SYNONYM?'
                                 : currentMode == 'idiom_to_desc'

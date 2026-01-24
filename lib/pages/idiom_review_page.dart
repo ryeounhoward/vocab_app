@@ -88,11 +88,17 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
         .map((s) => int.tryParse(s))
         .whereType<int>()
         .toSet();
+    final int? groupId = prefs.getInt('quiz_selected_idiom_group_id');
 
     // Apply inclusion filter (if user chose specific idioms).
     // If "use all" is OFF and nothing is selected, return an empty list.
     List<Map<String, dynamic>> filteredData;
-    if (useAllIdioms) {
+    if (groupId != null) {
+      final Set<int> groupIds = await dbHelper.getIdiomIdsForGroup(groupId);
+      filteredData = data
+          .where((item) => groupIds.contains(item['id'] as int? ?? -1))
+          .toList();
+    } else if (useAllIdioms) {
       filteredData = List<Map<String, dynamic>>.from(data);
     } else if (selectedIds.isNotEmpty) {
       filteredData = data
@@ -131,7 +137,19 @@ class _IdiomReviewPageState extends State<IdiomReviewPage> {
       targetIndex = orderedData.indexWhere(
         (item) => item['id'] == widget.selectedId,
       );
-      if (targetIndex == -1) targetIndex = 0;
+
+      if (targetIndex == -1) {
+        final fallback = data.firstWhere(
+          (item) => item['id'] == widget.selectedId,
+          orElse: () => <String, dynamic>{},
+        );
+        if (fallback.isNotEmpty) {
+          orderedData.insert(0, Map<String, dynamic>.from(fallback));
+          targetIndex = 0;
+        } else {
+          targetIndex = 0;
+        }
+      }
     }
 
     setState(() {
