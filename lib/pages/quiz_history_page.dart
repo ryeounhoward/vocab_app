@@ -1,8 +1,6 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'word_detail_page.dart';
 
 class QuizHistoryPage extends StatefulWidget {
@@ -129,7 +127,6 @@ class _QuizHistoryPageState extends State<QuizHistoryPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Quiz mode: $mode'),
                           Text('Duration: ${_formatDuration(durationSeconds)}'),
                           Text('Total items: $totalItems'),
                         ],
@@ -153,10 +150,17 @@ class _QuizHistoryPageState extends State<QuizHistoryPage> {
   }
 }
 
-class QuizHistoryDetailPage extends StatelessWidget {
+class QuizHistoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> historyItem;
 
   const QuizHistoryDetailPage({super.key, required this.historyItem});
+
+  @override
+  State<QuizHistoryDetailPage> createState() => _QuizHistoryDetailPageState();
+}
+
+class _QuizHistoryDetailPageState extends State<QuizHistoryDetailPage> {
+  bool _showDetails = true;
 
   String _formatDuration(int seconds) {
     if (seconds < 0) seconds = 0;
@@ -201,6 +205,7 @@ class QuizHistoryDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final historyItem = widget.historyItem;
     final List<Map<String, dynamic>> items =
         ((historyItem['items'] ?? []) as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -213,6 +218,14 @@ class QuizHistoryDetailPage extends StatelessWidget {
     final int correctCount = items
         .where((e) => (e['isCorrect'] ?? false) == true)
         .length;
+    final int skippedCount = items
+        .where((e) => (e['isSkipped'] ?? false) == true)
+        .length;
+
+    final double scorePercent = totalItems <= 0
+        ? 0
+        : (correctCount / totalItems).clamp(0.0, 1.0) * 100.0;
+    final bool isPassed = scorePercent >= 80.0;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Quiz Details'), centerTitle: true),
@@ -227,40 +240,30 @@ class QuizHistoryDetailPage extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                color: Colors.indigo,
+                color: isPassed ? Colors.green : Colors.red,
                 clipBehavior: Clip.antiAlias,
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 20,
+                  ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Quiz mode: $mode',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      if (date.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Date: $date',
-                          style: const TextStyle(color: Colors.white),
+                        '$correctCount / $totalItems',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
-                      ],
-                      const SizedBox(height: 6),
-                      Text(
-                        'Duration: ${_formatDuration(durationSeconds)}',
-                        style: const TextStyle(color: Colors.white),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Total items: $totalItems',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Total score: $correctCount / $totalItems',
+                        'Score: ${scorePercent.toStringAsFixed(0)}%',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -268,6 +271,70 @@ class QuizHistoryDetailPage extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            Align(alignment: Alignment.centerLeft),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _showDetails = !_showDetails;
+                    });
+                  },
+                  child: Text(
+                    _showDetails ? 'Collapse Details' : 'Show Details',
+                  ),
+                ),
+              ],
+            ),
+            if (_showDetails)
+              SizedBox(
+                width: double.infinity,
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  color: Colors.indigo,
+                  clipBehavior: Clip.antiAlias,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Quiz mode: $mode',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        if (date.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Date: $date',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ],
+                        const SizedBox(height: 6),
+                        Text(
+                          'Duration: ${_formatDuration(durationSeconds)}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Total items: $totalItems',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Skipped: $skippedCount',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             const SizedBox(height: 16),
             Align(
               alignment: Alignment.centerLeft,
@@ -295,6 +362,8 @@ class QuizHistoryDetailPage extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final item = items[index];
                         final String word = (item['word'] ?? '').toString();
+                        final bool isSkipped =
+                            (item['isSkipped'] ?? false) as bool;
                         final bool isCorrect =
                             (item['isCorrect'] ?? false) as bool;
                         final int itemDuration =
@@ -328,11 +397,15 @@ class QuizHistoryDetailPage extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    isCorrect ? 'Correct' : 'Wrong',
+                                    isSkipped
+                                        ? 'Skipped'
+                                        : (isCorrect ? 'Correct' : 'Wrong'),
                                     style: TextStyle(
-                                      color: isCorrect
-                                          ? Colors.green
-                                          : Colors.red,
+                                      color: isSkipped
+                                          ? Colors.orange
+                                          : (isCorrect
+                                                ? Colors.green
+                                                : Colors.red),
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),

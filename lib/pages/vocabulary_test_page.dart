@@ -39,6 +39,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   DateTime? _quizStartTime;
   DateTime? _questionStartTime;
   int _answeredCount = 0;
+  int _skippedCount = 0;
   bool _timeOver = false;
 
   // Quiz mode state (aligned with settings page)
@@ -72,16 +73,21 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   static int _cachedRemainingSeconds = 0;
   static int _cachedElapsedSeconds = 0;
   static int _cachedAnsweredCount = 0;
+  static int _cachedSkippedCount = 0;
   static String? _cachedQuizMode;
   static String? _cachedSelectionSignature;
 
   static int _cachedHintPoints = 0;
+
+  static List<String> _cachedSkippedRetakeKeys = <String>[];
 
   int _hintPoints = 0;
   String? _pictureHint;
   List<String> _revealedHints = [];
   String? _emptyReason; // tracks why the quiz has no data
   String? _selectionSignature;
+
+  final Set<String> _skippedRetakeKeys = <String>{};
 
   // Quiz history (only for desc_to_word / word_to_desc)
   final List<Map<String, dynamic>> _historyItems = [];
@@ -276,7 +282,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
         _remainingSeconds = _cachedRemainingSeconds;
         _elapsedSeconds = _cachedElapsedSeconds;
         _answeredCount = _cachedAnsweredCount;
+        _skippedCount = _cachedSkippedCount;
         _hintPoints = _cachedHintPoints;
+        _skippedRetakeKeys
+          ..clear()
+          ..addAll(_cachedSkippedRetakeKeys);
         _isLoading = false;
         // Recreate a start time based on elapsed seconds
         _quizStartTime = DateTime.now().subtract(
@@ -353,10 +363,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _timer?.cancel();
     _timeOver = false;
     _answeredCount = 0;
+    _skippedCount = 0;
     _elapsedSeconds = 0;
     _emptyReason = null;
     _historyItems.clear();
     _historySavedForCurrentQuiz = false;
+    _skippedRetakeKeys.clear();
 
     int targetCount = prefs.getInt('quiz_total_items') ?? 10;
     // Load quiz mode and timer settings from preferences
@@ -385,7 +397,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     // Decide which table to use based on quiz mode
     final bool isSynonymQuiz =
-      _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
+        _quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word';
     final bool isSentenceQuiz = _quizMode == 'sentence_to_word';
 
     List<Map<String, dynamic>> rawData;
@@ -698,9 +710,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     _cachedRemainingSeconds = _remainingSeconds;
     _cachedElapsedSeconds = _elapsedSeconds;
     _cachedAnsweredCount = _answeredCount;
+    _cachedSkippedCount = _skippedCount;
     _cachedHintPoints = _hintPoints;
     _cachedQuizMode = _quizMode;
     _cachedSelectionSignature = _selectionSignature;
+
+    _cachedSkippedRetakeKeys = _skippedRetakeKeys.toList(growable: false);
   }
 
   void _generateOptionsForCurrentQuestion(List<Map<String, dynamic>> pool) {
@@ -873,7 +888,160 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
       }
 
       _answeredCount++;
+
+      // If the user got this wrong (and this is one of the supported modes),
+      // queue the same item again later so they can learn from the mistake.
+      _scheduleRetakeIfNeeded(isCorrect);
     });
+  }
+
+  bool _isRetakeEligibleMode(String mode) {
+    return mode == 'desc_to_word' ||
+        mode == 'word_to_desc' ||
+        mode == 'sentence_to_word';
+  }
+
+  int _readRetakeNumber(Map<String, dynamic> item) {
+    final dynamic v = item['_retakeNumber'];
+    if (v is int) return v;
+    if (v is String) return int.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  bool _isRetakeItem(Map<String, dynamic> item) {
+    final dynamic v = item['_isRetake'];
+    if (v is bool) return v;
+    return _readRetakeNumber(item) > 0;
+  }
+
+  String _getRetakeKey(Map<String, dynamic> item, String mode) {
+    final dynamic id = item['id'];
+    return '$mode:${id?.toString() ?? ''}';
+  }
+
+  void _scheduleRetakeIfNeeded(bool isCorrect) {
+    if (isCorrect) return;
+    if (_quizData.isEmpty) return;
+
+    final currentQuestion = _quizData[_currentIndex];
+    final String currentMode = _questionModes.isNotEmpty
+        ? _questionModes[_currentIndex]
+        : _quizMode;
+
+    if (!_isRetakeEligibleMode(currentMode)) return;
+
+    // If the user chose to skip retakes for this word, don't keep re-adding it.
+    final String retakeKey = _getRetakeKey(currentQuestion, currentMode);
+    if (_skippedRetakeKeys.contains(retakeKey)) return;
+
+    final int nextRetakeNumber = _readRetakeNumber(currentQuestion) + 1;
+    final Map<String, dynamic> retake = Map<String, dynamic>.from(
+      currentQuestion,
+    );
+
+    // Clear any per-attempt cached prompts that would otherwise mutate the
+    // question. For sentence mode, we *keep* the cached prompt so the item is
+    // truly the same when retaken.
+    if (currentMode != 'sentence_to_word') {
+      retake.remove('_sentencePrompt');
+    }
+    retake.remove('_correctSynonym');
+    retake.remove('_promptSynonym');
+
+    retake['_isRetake'] = true;
+    retake['_retakeNumber'] = nextRetakeNumber;
+
+    _quizData = [..._quizData, retake];
+
+    if (_questionModes.isNotEmpty) {
+      _questionModes = [..._questionModes, currentMode];
+    }
+
+    // Keep countdown pacing consistent (60s per item).
+    if (_isCountdownTimerEnabled) {
+      _totalDurationSeconds += 60;
+      _remainingSeconds += 60;
+    }
+  }
+
+  void _goToNextQuestionAfterSkip() {
+    // Stop any ongoing TTS when moving to the next question
+    flutterTts.stop();
+
+    if (_currentIndex < _quizData.length - 1) {
+      setState(() {
+        _currentIndex++;
+        _isAnswered = false;
+        _selectedAnswer = null;
+        _generateOptionsForCurrentQuestion(_allWordsPool);
+        _answerController.clear();
+        _pictureHint = null;
+        _revealedHints = [];
+        _questionStartTime = DateTime.now();
+      });
+    } else {
+      _timer?.cancel();
+      _showResultDialog();
+    }
+  }
+
+  void _skipRetakeQuestion() {
+    if (_quizData.isEmpty || _timeOver) return;
+
+    final currentQuestion = _quizData[_currentIndex];
+    final String currentMode = _questionModes.isNotEmpty
+        ? _questionModes[_currentIndex]
+        : _quizMode;
+
+    if (!_isRetakeItem(currentQuestion)) return;
+    if (!_isRetakeEligibleMode(currentMode)) return;
+    if (_isAnswered) return;
+
+    _recordSkipHistory();
+
+    final String key = _getRetakeKey(currentQuestion, currentMode);
+    _skippedRetakeKeys.add(key);
+    _skippedCount++;
+
+    // Remove any future queued retake copies of this same item.
+    int removed = 0;
+    final List<Map<String, dynamic>> newQuizData = [];
+    final List<String> newModes = [];
+
+    for (int i = 0; i < _quizData.length; i++) {
+      final q = _quizData[i];
+      final String m = _questionModes.isNotEmpty
+          ? _questionModes[i]
+          : _quizMode;
+
+      final bool shouldDrop =
+          i > _currentIndex && _isRetakeItem(q) && _getRetakeKey(q, m) == key;
+
+      if (shouldDrop) {
+        removed++;
+        continue;
+      }
+
+      newQuizData.add(q);
+      if (_questionModes.isNotEmpty) {
+        newModes.add(m);
+      }
+    }
+
+    setState(() {
+      _quizData = newQuizData;
+      if (_questionModes.isNotEmpty) {
+        _questionModes = newModes;
+      }
+
+      if (_isCountdownTimerEnabled && removed > 0) {
+        final int delta = 60 * removed;
+        _totalDurationSeconds = (_totalDurationSeconds - delta).clamp(0, 86400);
+        _remainingSeconds = (_remainingSeconds - delta).clamp(0, 86400);
+      }
+    });
+
+    _goToNextQuestionAfterSkip();
   }
 
   List<String> _parseSynonyms(dynamic rawValue) {
@@ -937,8 +1105,10 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     String chosen = selected.first;
     for (final s in selected) {
-      if (RegExp(r'\b' + RegExp.escape(word) + r'\b', caseSensitive: false)
-          .hasMatch(s)) {
+      if (RegExp(
+        r'\b' + RegExp.escape(word) + r'\b',
+        caseSensitive: false,
+      ).hasMatch(s)) {
         chosen = s;
         break;
       }
@@ -1021,10 +1191,49 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     if (_quizData.isEmpty) return;
     final currentQuestion = _quizData[_currentIndex];
 
+    final String baseWord = (currentQuestion['word'] ?? '').toString();
+    final bool isRetake = _isRetakeItem(currentQuestion);
+    final String displayWord = isRetake && baseWord.isNotEmpty
+        ? '$baseWord (Retake)'
+        : baseWord;
+
     _historyItems.add({
       'wordId': currentQuestion['id'],
-      'word': (currentQuestion['word'] ?? '').toString(),
+      'word': displayWord,
+      'baseWord': baseWord,
+      'isRetake': isRetake,
+      'isSkipped': false,
+      'retakeNumber': _readRetakeNumber(currentQuestion),
       'isCorrect': isCorrect,
+      'durationSeconds': _getCurrentQuestionDurationSeconds(),
+      'wordData': _buildWordSnapshot(currentQuestion),
+    });
+  }
+
+  void _recordSkipHistory() {
+    if (!_isHistoryEligibleMode(_quizMode)) return;
+
+    final String currentMode = _questionModes.isNotEmpty
+        ? _questionModes[_currentIndex]
+        : _quizMode;
+
+    if (!_isHistoryEligibleMode(currentMode)) return;
+    if (_quizData.isEmpty) return;
+
+    final currentQuestion = _quizData[_currentIndex];
+
+    final String baseWord = (currentQuestion['word'] ?? '').toString();
+    final bool isRetake = _isRetakeItem(currentQuestion);
+
+    _historyItems.add({
+      'wordId': currentQuestion['id'],
+      'word': baseWord,
+      'baseWord': baseWord,
+      'isRetake': isRetake,
+      'isSkipped': true,
+      'retakeNumber': _readRetakeNumber(currentQuestion),
+      // Keep schema compatible with history UI expecting a bool.
+      'isCorrect': false,
       'durationSeconds': _getCurrentQuestionDurationSeconds(),
       'wordData': _buildWordSnapshot(currentQuestion),
     });
@@ -1178,9 +1387,13 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     // Compute summary numbers (works for all modes and with/without timers)
     final int totalItems = _quizData.length;
     final int answered = _answeredCount.clamp(0, totalItems);
+    final int skipped = _skippedCount.clamp(0, totalItems);
     final int correct = _score.clamp(0, answered);
     final int wrong = (answered - correct).clamp(0, totalItems);
-    final int notAnswered = (totalItems - answered).clamp(0, totalItems);
+    final int notAnswered = (totalItems - answered - skipped).clamp(
+      0,
+      totalItems,
+    );
 
     Duration? elapsedDuration;
     if (_quizStartTime != null) {
@@ -1243,11 +1456,10 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                 children: [
                   if (elapsedDuration != null)
                     Text('Duration: ${_formatDuration(elapsedDuration)}'),
-                  if (elapsedDuration != null) const SizedBox(height: 8),
                   Text('Total items: $totalItems'),
                   Text('Correct: $correct'),
                   Text('Wrong: $wrong'),
-                  Text('Not answered: $notAnswered'),
+                  Text('Skipped: $skipped'),
                 ],
               ),
             ),
@@ -1333,9 +1545,13 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
     final int totalItems = _quizData.length;
     final int answered = _answeredCount.clamp(0, totalItems);
+    final int skipped = _skippedCount.clamp(0, totalItems);
     final int correct = _score.clamp(0, answered);
     final int wrong = (answered - correct).clamp(0, totalItems);
-    final int notAnswered = (totalItems - answered).clamp(0, totalItems);
+    final int notAnswered = (totalItems - answered - skipped).clamp(
+      0,
+      totalItems,
+    );
 
     final int baseSeconds = _elapsedSeconds > 0
         ? _elapsedSeconds
@@ -1355,12 +1571,11 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Total time: ${_formatDuration(totalDuration)}'),
-            const SizedBox(height: 12),
             Text('Total items: $totalItems'),
             Text('Answered: $answered'),
             Text('Correct: $correct'),
             Text('Wrong: $wrong'),
-            Text('Not answered: $notAnswered'),
+            Text('Skipped: $skipped'),
           ],
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -1500,8 +1715,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
             ? "You need at least 4 idioms in your idiom list to start a quiz."
             : (_quizMode == 'word_to_synonym' || _quizMode == 'synonym_to_word')
             ? "You need at least 1 word with synonyms in your vocabulary list to start this quiz."
-        : _quizMode == 'sentence_to_word'
-        ? "You need at least 1 word with example sentences in your vocabulary list to start this quiz."
+            : _quizMode == 'sentence_to_word'
+            ? "You need at least 1 word with example sentences in your vocabulary list to start this quiz."
             : "You need at least 4 words in your vocabulary list to start a quiz.";
       }
 
@@ -1520,6 +1735,9 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     final String currentMode = _questionModes.isNotEmpty
         ? _questionModes[_currentIndex]
         : _quizMode;
+
+    final bool isRetakeQuestion =
+        _isRetakeItem(currentQuestion) && _isRetakeEligibleMode(currentMode);
 
     final bool isSynonymMode =
         currentMode == 'word_to_synonym' || currentMode == 'synonym_to_word';
@@ -1833,8 +2051,8 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                                 ? 'WHAT DOES THIS WORD MEAN?'
                                 : currentMode == 'word_to_synonym'
                                 ? 'WHICH SYNONYM MATCHES THIS WORD?'
-                              : currentMode == 'sentence_to_word'
-                              ? 'WHICH WORD COMPLETES THIS SENTENCE?'
+                                : currentMode == 'sentence_to_word'
+                                ? 'WHICH WORD COMPLETES THIS SENTENCE?'
                                 : currentMode == 'synonym_to_word'
                                 ? 'WHICH WORD MATCHES THIS SYNONYM?'
                                 : currentMode == 'idiom_to_desc'
@@ -1864,6 +2082,20 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    if (isRetakeQuestion && !_isAnswered && !_timeOver) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.skip_next),
+                              label: const Text('SKIP (DON\'T RETAKE)'),
+                              onPressed: _skipRetakeQuestion,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
