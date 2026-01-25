@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vocab_app/pages/idiom_review_page.dart';
+import 'package:vocab_app/pages/notes_page.dart';
 import 'package:vocab_app/pages/review_page.dart';
 
 import '../database/db_helper.dart';
@@ -112,18 +113,17 @@ class _MenuPageState extends State<MenuPage> {
                     ),
                   ),
 
-                  // 3. CONVERSATION CARD
                   // SizedBox(
                   //   height: cardHeight,
                   //   child: MenuCard(
                   //     title: "Conversation",
-                  //     imagePath: "assets/images/conversation.jpg",
+                  //     imagePath: "assets/images/notes.jpg",
                   //     color: Colors.greenAccent,
                   //     onTap: () {
                   //       Navigator.push(
                   //         context,
                   //         MaterialPageRoute(
-                  //           builder: (context) => const ConversationPage(),
+                  //           builder: (context) => const NotesPage(),
                   //         ),
                   //       );
                   //     },

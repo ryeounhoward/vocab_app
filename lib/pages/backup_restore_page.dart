@@ -22,6 +22,114 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
   String _loadingMessage = '';
 
+  // --- NOTES IMPORT/EXPORT ---
+  Future<void> _exportNotesToJson() async {
+    try {
+      await _showLoadingDialog("Exporting notes to JSON...");
+      // Fetch all notes from DB
+      List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
+      if (notes.isEmpty) {
+        _showSnackBar("No notes found to export");
+        return;
+      }
+      Map<String, dynamic> notesBackup = {"version": 1, "notes": notes};
+      String jsonString = jsonEncode(notesBackup);
+      Uint8List bytes = Uint8List.fromList(utf8.encode(jsonString));
+      String? outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Notes JSON:',
+        fileName: 'notes_backup.json',
+        bytes: bytes,
+      );
+      if (outputPath != null) {
+        _showSnackBar("Notes backup saved successfully!");
+      }
+    } catch (e) {
+      _showSnackBar("Export Notes Error: $e");
+    } finally {
+      _hideLoadingDialog();
+    }
+  }
+
+  Future<void> _importNotesFromJson() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+      );
+      if (result != null && result.files.single.path != null) {
+        File file = File(result.files.single.path!);
+        String content = await file.readAsString();
+        dynamic jsonData = jsonDecode(content);
+        List<dynamic> notesToProcess = [];
+        if (jsonData is Map && jsonData.containsKey('notes')) {
+          notesToProcess = jsonData['notes'] ?? [];
+        } else if (jsonData is List) {
+          notesToProcess = jsonData;
+        }
+        bool? confirm = await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Import Notes"),
+            content: Text(
+              "Items found:\n- Notes: " +
+                  notesToProcess.length.toString() +
+                  "\n\nExisting notes will be skipped. Continue?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Import"),
+              ),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          await _showLoadingDialog("Importing notes from JSON...");
+          try {
+            int addedNotes = await _processNotesImport(notesToProcess);
+            _showSnackBar("Notes import finished! Added: $addedNotes notes.");
+          } finally {
+            _hideLoadingDialog();
+          }
+        }
+      }
+    } catch (e) {
+      _showSnackBar("Import Notes Failed: $e");
+    }
+  }
+
+  Future<int> _processNotesImport(List<dynamic> notes) async {
+    if (notes.isEmpty) return 0;
+    List<Map<String, dynamic>> existingNotes = await _dbHelper.queryAll(
+      'notes',
+    );
+    Set<String> existingKeys = existingNotes
+        .map((e) => (e['id'] ?? '').toString())
+        .toSet();
+    int addedCount = 0;
+    for (var item in notes) {
+      Map<String, dynamic> row = Map<String, dynamic>.from(item);
+      // Use a unique key for notes, e.g., title+content or id if available
+      String? noteKey;
+      if (row.containsKey('id')) {
+        noteKey = row['id'].toString();
+      } else if (row.containsKey('title') && row.containsKey('content')) {
+        noteKey =
+            row['title'].toString().trim() + row['content'].toString().trim();
+      }
+      if (noteKey != null && !existingKeys.contains(noteKey)) {
+        row.remove('id');
+        await _dbHelper.insert(row, 'notes');
+        existingKeys.add(noteKey);
+        addedCount++;
+      }
+    }
+    return addedCount;
+  }
+
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -297,6 +405,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         backupPayload['quiz_history_next_number'] = quizHistoryNext;
       }
 
+      // --- Include notes in backup ---
+      List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
+      backupPayload['notes'] = notes;
+
       String jsonString = jsonEncode(backupPayload);
       List<int> jsonBytes = utf8.encode(jsonString);
 
@@ -451,12 +563,18 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           }
         }
 
+        // --- Notes import ---
+        List<dynamic> notesToProcess = [];
+        if (jsonData is Map && jsonData['notes'] is List) {
+          notesToProcess = jsonData['notes'] as List<dynamic>;
+        }
+
         bool? confirm = await showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text("Import ZIP Backup"),
             content: Text(
-              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n\nContinue?",
+              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n- ${notesToProcess.length} notes\n\nContinue?",
             ),
             actions: [
               TextButton(
@@ -516,9 +634,25 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             int createdWordGroups = await _processWordGroupsImport(
               wordGroupsToProcess,
             );
+            int addedNotes = await _processNotesImport(notesToProcess);
+
             _showSnackBar(
-              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, and $photoCount photos.",
+              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, and $photoCount photos.",
             );
+
+            // --- Refresh notes page if open ---
+            if (mounted) {
+              // Try to find NotesPage in the navigation stack and refresh it
+              // (If not found, do nothing. If user is on NotesPage, will refresh.)
+              // This is a best effort; for more robust, use a state management solution.
+              // Here, we use a notification.
+              // ignore: use_build_context_synchronously
+              Navigator.of(context).popUntil((route) => true); // pop dialog
+              // ignore: use_build_context_synchronously
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text("Notes updated!")));
+            }
           } finally {
             _hideLoadingDialog();
           }
@@ -740,6 +874,31 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             Icons.file_download,
             Colors.green,
             _importData,
+          ),
+
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Divider(),
+          ),
+
+          const Text(
+            "Notes Backup (JSON)",
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+          ),
+          const SizedBox(height: 10),
+          _buildCard(
+            "Export Notes JSON",
+            "Save all notes as JSON",
+            Icons.note_add,
+            Colors.teal,
+            _exportNotesToJson,
+          ),
+          _buildCard(
+            "Import Notes JSON",
+            "Restore notes from JSON",
+            Icons.note,
+            Colors.indigo,
+            _importNotesFromJson,
           ),
         ],
       ),
