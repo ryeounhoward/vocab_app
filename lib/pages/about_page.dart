@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert'; // For GitHub API JSON
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http; // For update check
+import 'package:ota_update/ota_update.dart'; // For auto-install
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
@@ -17,6 +20,11 @@ class _AboutPageState extends State<AboutPage> {
   String _appVersion = '';
   String _cacheSize = '0.00 MB';
   String _dataSize = '0.00 MB';
+
+  // Update State
+  bool _isCheckingUpdate = false;
+  String? _latestVersion;
+  String? _downloadUrl;
 
   static const String _creatorName = 'Ryeoun Howard';
   static const String _driveUrl =
@@ -44,6 +52,79 @@ class _AboutPageState extends State<AboutPage> {
     } catch (_) {}
   }
 
+  // --- GITHUB UPDATE LOGIC ---
+  Future<void> _checkForUpdateManual() async {
+    setState(() => _isCheckingUpdate = true);
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://api.github.com/repos/ryeounhoward/vocab_app/releases/latest',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String latestTag = data['tag_name'];
+        String url = data['assets'][0]['browser_download_url'];
+
+        if (latestTag != "v$_appVersion") {
+          setState(() {
+            _latestVersion = latestTag;
+            _downloadUrl = url;
+          });
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('You are on the latest version!')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to check for updates')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  void _confirmUpdate() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text("Update to $_latestVersion?"),
+        content: const Text(
+          "The app will download the new version and automatically open the installer.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showDownloadProgressModal();
+            },
+            child: const Text("Download & Install"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDownloadProgressModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _OtaDownloadDialog(url: _downloadUrl!),
+    );
+  }
+
+  // --- STORAGE LOGIC ---
   Future<void> _loadStorageInfo() async {
     try {
       final cacheDir = await getTemporaryDirectory();
@@ -70,7 +151,6 @@ class _AboutPageState extends State<AboutPage> {
     return totalSize;
   }
 
-  // --- NEW: CONFIRMATION MODAL FOR CLEAR CACHE ---
   void _confirmClearCache() {
     showDialog(
       context: context,
@@ -83,7 +163,7 @@ class _AboutPageState extends State<AboutPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            child: const Text("Cancel"),
           ),
           TextButton(
             onPressed: () {
@@ -105,10 +185,10 @@ class _AboutPageState extends State<AboutPage> {
       final cacheDir = await getTemporaryDirectory();
       if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
       _loadStorageInfo();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Cache cleared')));
+      if (!mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Cache cleared')));
     } catch (_) {}
   }
 
@@ -132,7 +212,6 @@ class _AboutPageState extends State<AboutPage> {
     super.dispose();
   }
 
-  // Helper to build rows in the info section
   Widget _buildInfoRow(String label, Widget valueWidget) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
@@ -163,36 +242,8 @@ class _AboutPageState extends State<AboutPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Exam Countdown
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.indigo.shade50,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Exam Countdown',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      _buildCountdownBox('$days', 'Days'),
-                      const SizedBox(width: 8),
-                      _buildCountdownBox('$hours', 'Hours'),
-                      const SizedBox(width: 8),
-                      _buildCountdownBox('$minutes', 'Mins'),
-                      const SizedBox(width: 8),
-                      _buildCountdownBox('$seconds', 'Secs'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            // 1. Countdown
+            _buildCountdownSection(days, hours, minutes, seconds),
             const SizedBox(height: 24),
 
             // 2. Disclaimer
@@ -202,7 +253,7 @@ class _AboutPageState extends State<AboutPage> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'This application was developed as a personal learning tool for practicing quizzes and keeping vocabulary notes. The project prioritizes learning and experimentation over polished code structure or production-ready design. Some parts were implemented quickly to support the learning process. This app is intended for educational use only.',
+              'This application was developed as a personal learning tool for practicing quizzes and keeping vocabulary notes. This app is intended for educational use only.',
               style: TextStyle(
                 fontSize: 14,
                 height: 1.4,
@@ -211,7 +262,7 @@ class _AboutPageState extends State<AboutPage> {
             ),
             const SizedBox(height: 24),
 
-            // 3. App Information (Grouped for consistent spacing/color)
+            // 3. App Information
             const Text(
               'App Information',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -232,13 +283,47 @@ class _AboutPageState extends State<AboutPage> {
                       style: const TextStyle(fontWeight: FontWeight.w500),
                     ),
                   ),
+
+                  // VERSION ROW
                   _buildInfoRow(
                     'Version',
-                    Text(
-                      _appVersion,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    Row(
+                      children: [
+                        Text(
+                          _appVersion,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(width: 12),
+                        if (_latestVersion == null)
+                          GestureDetector(
+                            onTap: _isCheckingUpdate
+                                ? null
+                                : _checkForUpdateManual,
+                            child: Text(
+                              _isCheckingUpdate
+                                  ? 'Checking...'
+                                  : 'Check Update',
+                              style: const TextStyle(
+                                color: Colors.indigo,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          )
+                        else
+                          GestureDetector(
+                            onTap: _confirmUpdate,
+                            child: const Text(
+                              'Update Available!',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+
                   _buildInfoRow(
                     'App Data',
                     Text(
@@ -296,7 +381,37 @@ class _AboutPageState extends State<AboutPage> {
     );
   }
 
-  // --- UI HELPER WIDGETS ---
+  Widget _buildCountdownSection(int d, int h, int m, int s) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.indigo.shade50,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Exam Countdown',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildCountdownBox('$d', 'Days'),
+              const SizedBox(width: 8),
+              _buildCountdownBox('$h', 'Hours'),
+              const SizedBox(width: 8),
+              _buildCountdownBox('$m', 'Mins'),
+              const SizedBox(width: 8),
+              _buildCountdownBox('$s', 'Secs'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildCountdownBox(String value, String label) {
     return Expanded(
@@ -344,5 +459,68 @@ class _AboutPageState extends State<AboutPage> {
           context,
         ).showSnackBar(const SnackBar(content: Text('Could not open link')));
     }
+  }
+}
+
+// --- SEPARATE DIALOG WIDGET TO FIX THE "ALREADY RUNNING" ERROR ---
+class _OtaDownloadDialog extends StatefulWidget {
+  final String url;
+  const _OtaDownloadDialog({required this.url});
+
+  @override
+  State<_OtaDownloadDialog> createState() => _OtaDownloadDialogState();
+}
+
+class _OtaDownloadDialogState extends State<_OtaDownloadDialog> {
+  double _progress = 0;
+  String _status = "Starting download...";
+
+  @override
+  void initState() {
+    super.initState();
+    _startOta();
+  }
+
+  void _startOta() {
+    try {
+      OtaUpdate()
+          .execute(widget.url, destinationFilename: 'app-release.apk')
+          .listen(
+            (OtaEvent event) {
+              if (!mounted) return;
+              setState(() {
+                if (event.status == OtaStatus.DOWNLOADING) {
+                  _progress = double.tryParse(event.value ?? "0") ?? 0;
+                  _status = "Downloading...";
+                } else if (event.status == OtaStatus.INSTALLING) {
+                  _status = "Installing...";
+                  Navigator.pop(context); // Close dialog
+                } else if (event.status.toString().contains("ERROR")) {
+                  _status = "Error: ${event.status}";
+                }
+              });
+            },
+            onError: (e) {
+              if (mounted) setState(() => _status = "Download failed");
+            },
+          );
+    } catch (e) {
+      debugPrint("OTA Error: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Downloading Update"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicator(value: _progress / 100),
+          const SizedBox(height: 20),
+          Text("$_status (${_progress.toInt()}%)"),
+        ],
+      ),
+    );
   }
 }
