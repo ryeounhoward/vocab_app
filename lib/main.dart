@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:ota_update/ota_update.dart';
 
 // SERVICES
 import 'services/notification_service.dart';
@@ -13,7 +17,7 @@ import 'pages/menu_screen.dart';
 import 'pages/settings_page.dart';
 import 'pages/quiz_page.dart';
 import 'pages/vocabulary_test_page.dart';
-import 'pages/notes_page.dart'; // Import your new Notes Page
+import 'pages/notes_page.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -25,41 +29,183 @@ void callbackDispatcher() {
   });
 }
 
+// ==========================================================
+// CORRECTED GITHUB AUTO-UPDATE SERVICE
+// ==========================================================
+class GitHubUpdateService {
+  static const String owner = "ryeounhoward";
+  static const String repo = "vocab_app";
+  static bool _isCheckInProgress = false;
+
+  static Future<void> checkForUpdates(BuildContext context) async {
+    if (_isCheckInProgress) return;
+    _isCheckInProgress = true;
+
+    final url = Uri.parse(
+      'https://api.github.com/repos/$owner/$repo/releases/latest',
+    );
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String latestTag = data['tag_name'];
+        String downloadUrl = data['assets'][0]['browser_download_url'];
+
+        PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        String currentVersion = "v${packageInfo.version}";
+
+        if (latestTag != currentVersion) {
+          if (!context.mounted) return;
+          _showUpdateNotice(context, latestTag, downloadUrl);
+        }
+      }
+    } catch (e) {
+      debugPrint("Update check failed: $e");
+    } finally {
+      _isCheckInProgress = false;
+    }
+  }
+
+  static void _showUpdateNotice(
+    BuildContext context,
+    String version,
+    String url,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text("New Update Available"),
+        content: Text("Version $version is ready. Download and install now?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Later"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Close notice
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => _DownloadDialog(url: url),
+              );
+            },
+            child: const Text("Update Now"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// UI widget for the progress bar
+class _DownloadDialog extends StatefulWidget {
+  final String url;
+  const _DownloadDialog({required this.url});
+
+  @override
+  State<_DownloadDialog> createState() => _DownloadDialogState();
+}
+
+class _DownloadDialogState extends State<_DownloadDialog> {
+  double _progress = 0;
+  String _status = "Initializing...";
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    startDownload();
+  }
+
+  void startDownload() {
+    try {
+      OtaUpdate()
+          .execute(widget.url, destinationFilename: 'app-release.apk')
+          .listen(
+            (OtaEvent event) {
+              if (!mounted) return;
+              setState(() {
+                switch (event.status) {
+                  case OtaStatus.DOWNLOADING:
+                    _status = "Downloading...";
+                    _progress = double.tryParse(event.value ?? "0") ?? 0;
+                    break;
+                  case OtaStatus.INSTALLING:
+                    _status = "Opening installer...";
+                    Navigator.pop(context);
+                    break;
+                  case OtaStatus.ALREADY_RUNNING_ERROR:
+                    _status = "Already downloading...";
+                    break;
+                  case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
+                    _status = "Permission Denied";
+                    _hasError = true;
+                    break;
+                  default:
+                    if (event.status.toString().contains("ERROR")) {
+                      _status = "Error: ${event.status}";
+                      _hasError = true;
+                    }
+                    break;
+                }
+              });
+            },
+            onError: (e) {
+              setState(() {
+                _status = "Download Failed";
+                _hasError = true;
+              });
+            },
+          );
+    } catch (e) {
+      debugPrint("OTA Error: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Downloading Update"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicator(value: _progress / 100),
+          const SizedBox(height: 20),
+          Text("$_status (${_progress.toInt()}%)"),
+          if (_hasError)
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+        ],
+      ),
+    );
+  }
+}
+// ==========================================================
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Audio setup
   if (!kIsWeb) {
     AudioPlayer.global.setAudioContext(
       AudioContext(
-        iOS: AudioContextIOS(
-          category: AVAudioSessionCategory.playback,
-          options: <AVAudioSessionOptions>{AVAudioSessionOptions.mixWithOthers},
-        ),
+        iOS: AudioContextIOS(category: AVAudioSessionCategory.playback),
         android: const AudioContextAndroid(
-          isSpeakerphoneOn: false,
-          stayAwake: false,
-          contentType: AndroidContentType.sonification,
           usageType: AndroidUsageType.notification,
-          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          contentType: AndroidContentType.sonification,
         ),
       ),
     );
   }
 
-  // Background services
-  _initBackgroundServices();
+  await NotificationService.init();
+  Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
 
   runApp(const MyApp());
-}
-
-Future<void> _initBackgroundServices() async {
-  await NotificationService.init();
-  try {
-    Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
-  } catch (e) {
-    debugPrint("Workmanager init failed: $e");
-  }
 }
 
 class MyApp extends StatelessWidget {
@@ -73,14 +219,10 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(primarySwatch: Colors.indigo),
       home: const MainContainer(),
       title: 'Vocabulary App',
-
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
-
-        // This is the correct name for version 11.5.0
-        // Because you used 'as quill', you must use 'quill.FlutterQuillLocalizations'
         quill.FlutterQuillLocalizations.delegate,
       ],
       supportedLocales: const [Locale('en', 'US')],
@@ -90,7 +232,6 @@ class MyApp extends StatelessWidget {
 
 class MainContainer extends StatefulWidget {
   const MainContainer({super.key});
-
   @override
   State<MainContainer> createState() => _MainContainerState();
 }
@@ -98,14 +239,22 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   int _currentIndex = 0;
 
-  // Added NotesPage() to the list of screens
   final List<Widget> _pages = [
-    const MenuPage(), // 0
-    const QuizPage(), // 1
-    const VocabularyTestPage(), // 2
-    const NotesPage(), // 3: Added the Notes tab here
-    const SettingsPage(), // 4
+    const MenuPage(),
+    const QuizPage(),
+    const VocabularyTestPage(),
+    const NotesPage(),
+    const SettingsPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // CALL THE UPDATE SERVICE
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      GitHubUpdateService.checkForUpdates(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +273,6 @@ class _MainContainerState extends State<MainContainer> {
           ),
           BottomNavigationBarItem(icon: Icon(Icons.style), label: 'Practice'),
           BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Quiz'),
-          // ADDED THIS ITEM:
           BottomNavigationBarItem(
             icon: Icon(Icons.note_alt_outlined),
             label: 'Notes',
