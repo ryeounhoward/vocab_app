@@ -3,6 +3,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../database/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vocab_app/services/refresh_signal.dart'; // IMPORT THE SIGNAL SERVICE
+
+// Ensure this import points to your sort page
+import 'sort_words_data_page.dart';
 
 class QuizPage extends StatefulWidget {
   const QuizPage({super.key});
@@ -16,39 +20,36 @@ class _QuizPageState extends State<QuizPage> {
   final FlutterTts flutterTts = FlutterTts();
   List<Map<String, dynamic>> _vocabList = [];
   bool _isLoading = true;
-  int? _flippedIndex; // This will track the absolute PageView index
-  bool _isIdiomMode = false; // practice mode: false = words, true = idioms
+  int? _flippedIndex;
+  bool _isIdiomMode = false;
 
-  // 1. Define a PageController
   PageController? _pageController;
-  // A large number to simulate infinity
   final int _loopSeparator = 10000;
-
-  // --- FLIP SOUND ---
-  Future<void> _playFlipSound() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      // Separate practice swoosh preference; default ON
-      final bool isSoundEnabled =
-          prefs.getBool('practice_swoosh_sound_enabled') ?? true;
-      if (!isSoundEnabled) return;
-
-      final player = AudioPlayer();
-      await player.play(AssetSource('sounds/swoosh2.mp3'));
-
-      player.onPlayerComplete.listen((event) {
-        player.dispose();
-      });
-    } catch (e) {
-      debugPrint('Error playing flip sound: $e');
-    }
-  }
 
   @override
   void initState() {
     super.initState();
-    _loadData();
     _initTts();
+    _loadData();
+
+    // 1. START LISTENING for the global refresh signal
+    DataRefreshSignal.refreshNotifier.addListener(_onGlobalRefresh);
+  }
+
+  // 2. DEFINE the refresh callback
+  void _onGlobalRefresh() {
+    if (mounted) {
+      _loadData();
+    }
+  }
+
+  @override
+  void dispose() {
+    // 3. STOP LISTENING to prevent memory leaks
+    DataRefreshSignal.refreshNotifier.removeListener(_onGlobalRefresh);
+    flutterTts.stop();
+    _pageController?.dispose();
+    super.dispose();
   }
 
   void _initTts() async {
@@ -66,15 +67,24 @@ class _QuizPageState extends State<QuizPage> {
     await flutterTts.setSpeechRate(0.5);
   }
 
-  @override
-  void dispose() {
-    flutterTts.stop();
-    _pageController?.dispose(); // Dispose controller
-    super.dispose();
+  /// Opens Sort page and refreshes data immediately upon return
+  Future<void> _openFilterSettings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SortWordsDataPage()),
+    );
+
+    // Note: Since SortWordsDataPage now sends a refresh signal on save,
+    // _onGlobalRefresh will likely trigger automatically.
+    // But calling it here manually ensures a refresh even if user just backed out.
+    _loadData();
   }
 
   void _loadData() async {
     final prefs = await SharedPreferences.getInstance();
+    // Forces SharedPreferences to read latest changes from disk
+    await prefs.reload();
+
     final practiceMode = prefs.getString('practice_mode') ?? 'vocab';
     final bool isIdiomMode = practiceMode == 'idiom';
 
@@ -82,22 +92,20 @@ class _QuizPageState extends State<QuizPage> {
       isIdiomMode ? DBHelper.tableIdioms : DBHelper.tableVocab,
     );
 
-    // For vocabulary and idiom modes, respect the selected subsets from
-    // SortWordsDataPage and SortIdiomsDataPage, respectively.
-    // If "use all" is OFF and nothing is selected, use an empty list.
-    List<Map<String, dynamic>> filteredData;
+    List<Map<String, dynamic>> filteredData = [];
+
     if (!isIdiomMode) {
-      // Vocabulary subset
+      // --- VOCABULARY FILTERING ---
       final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
+      final int? groupId = prefs.getInt('quiz_selected_word_group_id');
       final List<String> storedIds =
-          prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
+          prefs.getStringList('quiz_selected_word_ids') ?? [];
       final Set<int> selectedIds = storedIds
           .map((s) => int.tryParse(s))
           .whereType<int>()
           .toSet();
-      final int? groupId = prefs.getInt('quiz_selected_word_group_id');
 
-      if (groupId != null) {
+      if (!useAllWords && groupId != null) {
         final Set<int> groupIds = await dbHelper.getWordIdsForGroup(groupId);
         filteredData = data
             .where((item) => groupIds.contains(item['id'] as int? ?? -1))
@@ -108,21 +116,19 @@ class _QuizPageState extends State<QuizPage> {
         filteredData = data
             .where((item) => selectedIds.contains(item['id'] as int? ?? -1))
             .toList();
-      } else {
-        filteredData = <Map<String, dynamic>>[];
       }
     } else {
-      // Idiom subset
+      // --- IDIOM FILTERING ---
       final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
+      final int? groupId = prefs.getInt('quiz_selected_idiom_group_id');
       final List<String> storedIds =
-          prefs.getStringList('quiz_selected_idiom_ids') ?? <String>[];
+          prefs.getStringList('quiz_selected_idiom_ids') ?? [];
       final Set<int> selectedIds = storedIds
           .map((s) => int.tryParse(s))
           .whereType<int>()
           .toSet();
-      final int? groupId = prefs.getInt('quiz_selected_idiom_group_id');
 
-      if (groupId != null) {
+      if (!useAllIdioms && groupId != null) {
         final Set<int> groupIds = await dbHelper.getIdiomIdsForGroup(groupId);
         filteredData = data
             .where((item) => groupIds.contains(item['id'] as int? ?? -1))
@@ -133,29 +139,44 @@ class _QuizPageState extends State<QuizPage> {
         filteredData = data
             .where((item) => selectedIds.contains(item['id'] as int? ?? -1))
             .toList();
-      } else {
-        filteredData = <Map<String, dynamic>>[];
       }
     }
 
     List<Map<String, dynamic>> shuffledList = List.from(filteredData);
-    shuffledList.shuffle(); // 2. Shuffle the list
+    shuffledList.shuffle();
 
-    setState(() {
-      _isIdiomMode = isIdiomMode;
-      _vocabList = shuffledList;
+    if (mounted) {
+      setState(() {
+        _isIdiomMode = isIdiomMode;
+        _vocabList = shuffledList;
+        _flippedIndex =
+            null; // Reset flipped state because the word list changed
 
-      // 3. Initialize controller at a high multiple of the list length
-      // This allows swiping left immediately.
-      if (_vocabList.isNotEmpty) {
-        int initialPage = _vocabList.length * (_loopSeparator ~/ 2);
-        _pageController = PageController(
-          viewportFraction: 0.85,
-          initialPage: initialPage,
-        );
-      }
-      _isLoading = false;
-    });
+        if (_vocabList.isNotEmpty) {
+          int initialPage = _vocabList.length * (_loopSeparator ~/ 2);
+          _pageController = PageController(
+            viewportFraction: 0.85,
+            initialPage: initialPage,
+          );
+        }
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _playFlipSound() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bool isSoundEnabled =
+          prefs.getBool('practice_swoosh_sound_enabled') ?? true;
+      if (!isSoundEnabled) return;
+
+      final player = AudioPlayer();
+      await player.play(AssetSource('sounds/swoosh2.mp3'));
+      player.onPlayerComplete.listen((event) => player.dispose());
+    } catch (e) {
+      debugPrint('Error playing flip sound: $e');
+    }
   }
 
   Future<void> _speak(String text) async {
@@ -172,79 +193,82 @@ class _QuizPageState extends State<QuizPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_vocabList.isEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Text(
-            _isIdiomMode
-                ? "No idioms found. Please add some first."
-                : "No vocabulary found. Please add some first.",
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
+      // The IconButton has been removed from here
       appBar: AppBar(title: const Text("Practice"), centerTitle: true),
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                "Tap the card to see the answer.\nSwipe to move to the next word.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+      body: _vocabList.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Text(
+                      _isIdiomMode
+                          ? "No idioms found for the current filter."
+                          : "No vocabulary found for the current filter.",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  // Note: You might want to keep this button
+                  // or remove it too if you want NO way to filter from here.
+                  ElevatedButton.icon(
+                    onPressed: _openFilterSettings,
+                    icon: const Icon(Icons.filter_list),
+                    label: const Text("Adjust Filter Settings"),
+                  ),
+                ],
               ),
-            ),
-            Expanded(
-              child: PageView.builder(
-                // 4. Set a very high item count for infinite looping
-                itemCount: _vocabList.length * _loopSeparator,
-                controller: _pageController,
-                onPageChanged: (index) {
-                  setState(() {
-                    _flippedIndex = null; // Reset flip state on swipe
-                    flutterTts.stop();
-                  });
-                },
-                itemBuilder: (context, index) {
-                  // 5. Use modulo to map the large index back to the list range
-                  final actualIndex = index % _vocabList.length;
-                  final item = _vocabList[actualIndex];
-                  bool isThisCardFlipped = _flippedIndex == index;
-
-                  return GestureDetector(
-                    onTap: () {
-                      final bool willShowAnswer = _flippedIndex != index;
-
-                      setState(() {
-                        flutterTts.stop();
-                        if (_flippedIndex == index) {
+            )
+          : SafeArea(
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text(
+                      "Tap the card to see the answer.\nSwipe to move to the next word.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                  Expanded(
+                    child: PageView.builder(
+                      itemCount: _vocabList.length * _loopSeparator,
+                      controller: _pageController,
+                      onPageChanged: (index) {
+                        setState(() {
                           _flippedIndex = null;
-                        } else {
-                          _flippedIndex = index;
-                        }
-                      });
+                          flutterTts.stop();
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                        final actualIndex = index % _vocabList.length;
+                        final item = _vocabList[actualIndex];
+                        bool isThisCardFlipped = _flippedIndex == index;
 
-                      // Play sound only when flipping to show the answer side
-                      if (willShowAnswer) {
-                        _playFlipSound();
-                      }
-                    },
-                    child: _buildFlipCard(item, isThisCardFlipped),
-                  );
-                },
+                        return GestureDetector(
+                          onTap: () {
+                            final bool willShowAnswer = _flippedIndex != index;
+                            setState(() {
+                              flutterTts.stop();
+                              _flippedIndex = (willShowAnswer) ? index : null;
+                            });
+                            if (willShowAnswer) _playFlipSound();
+                          },
+                          child: _buildFlipCard(item, isThisCardFlipped),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 50),
+                ],
               ),
             ),
-            const SizedBox(height: 50),
-          ],
-        ),
-      ),
     );
   }
 
-  // --- KEEPING YOUR EXACT CARD DESIGN ---
   Widget _buildFlipCard(Map<String, dynamic> item, bool isFlipped) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 400),
@@ -302,14 +326,13 @@ class _QuizPageState extends State<QuizPage> {
   }) {
     return Container(
       key: key,
-      margin: const EdgeInsets.symmetric(vertical: 20, horizontal: 5),
+      margin: const EdgeInsets.symmetric(vertical: 20, horizontal: 10),
       width: double.infinity,
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
-            // ignore: deprecated_member_use
             color: Colors.black.withOpacity(0.1),
             blurRadius: 15,
             offset: const Offset(0, 8),
@@ -322,7 +345,6 @@ class _QuizPageState extends State<QuizPage> {
             top: 10,
             right: 10,
             child: IconButton(
-              // ignore: deprecated_member_use
               icon: Icon(Icons.volume_up, color: textColor.withOpacity(0.6)),
               onPressed: () => _speak(content),
             ),
@@ -352,7 +374,6 @@ class _QuizPageState extends State<QuizPage> {
                         fontSize: 16,
                         fontWeight: FontWeight.w400,
                         fontStyle: FontStyle.italic,
-                        // ignore: deprecated_member_use
                         color: textColor.withOpacity(0.7),
                       ),
                     ),

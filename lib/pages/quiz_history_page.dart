@@ -357,6 +357,7 @@ class _QuizHistoryDetailPageState extends State<QuizHistoryDetailPage> {
                       ),
                     )
                   : ListView.separated(
+                      padding: const EdgeInsets.only(bottom: 80),
                       itemCount: items.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {

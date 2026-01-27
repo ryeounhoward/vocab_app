@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:vocab_app/services/refresh_signal.dart';
 import '../database/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'search_page.dart';
@@ -23,7 +24,6 @@ class _ReviewPageState extends State<ReviewPage> {
   bool _isLoading = true;
   PageController? _pageController;
 
-  // FIX 1: Add a variable to store the preferred voice in memory
   Map<String, String>? _currentVoice;
 
   @override
@@ -31,6 +31,24 @@ class _ReviewPageState extends State<ReviewPage> {
     super.initState();
     _initTts();
     _loadAndShuffle();
+    // Start listening for the refresh signal
+    DataRefreshSignal.refreshNotifier.addListener(_onGlobalRefresh);
+  }
+
+  // FIX: This was missing! This method runs when the Sort page saves data.
+  void _onGlobalRefresh() {
+    if (mounted) {
+      _loadAndShuffle();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Stop listening to prevent memory leaks
+    DataRefreshSignal.refreshNotifier.removeListener(_onGlobalRefresh);
+    flutterTts.stop();
+    _pageController?.dispose();
+    super.dispose();
   }
 
   void _initTts() async {
@@ -38,7 +56,6 @@ class _ReviewPageState extends State<ReviewPage> {
     String? voiceName = prefs.getString('selected_voice_name');
     String? voiceLocale = prefs.getString('selected_voice_locale');
 
-    // FIX 2: Store the voice in the variable and set it initially
     if (voiceName != null && voiceLocale != null) {
       _currentVoice = {"name": voiceName, "locale": voiceLocale};
       await flutterTts.setVoice(_currentVoice!);
@@ -51,11 +68,12 @@ class _ReviewPageState extends State<ReviewPage> {
   }
 
   void _loadAndShuffle() async {
-    // ONLY vocabulary words
     final data = await dbHelper.queryAll(DBHelper.tableVocab);
 
-    // Read preferences for which words to include
     final prefs = await SharedPreferences.getInstance();
+    // IMPORTANT: Force the app to see the latest changes on the disk
+    await prefs.reload();
+
     final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
     final List<String> storedIds =
         prefs.getStringList('quiz_selected_word_ids') ?? <String>[];
@@ -65,8 +83,6 @@ class _ReviewPageState extends State<ReviewPage> {
         .toSet();
     final int? groupId = prefs.getInt('quiz_selected_word_group_id');
 
-    // Apply inclusion filter (if user chose specific words).
-    // If "use all" is OFF and nothing is selected, return an empty list.
     List<Map<String, dynamic>> filteredData;
     if (groupId != null) {
       final Set<int> groupIds = await dbHelper.getWordIdsForGroup(groupId);
@@ -83,10 +99,7 @@ class _ReviewPageState extends State<ReviewPage> {
       filteredData = <Map<String, dynamic>>[];
     }
 
-    // Read preferred order from settings
     final order = prefs.getString('practice_order') ?? 'shuffle';
-
-    // Start from a mutable copy
     List<Map<String, dynamic>> orderedData = List.from(filteredData);
 
     if (order == 'az') {
@@ -102,7 +115,6 @@ class _ReviewPageState extends State<ReviewPage> {
         return bWord.compareTo(aWord);
       });
     } else {
-      // Default: shuffle randomly
       orderedData.shuffle();
     }
 
@@ -139,13 +151,6 @@ class _ReviewPageState extends State<ReviewPage> {
     });
   }
 
-  @override
-  void dispose() {
-    flutterTts.stop();
-    _pageController?.dispose();
-    super.dispose();
-  }
-
   Future<void> _playFavoriteSound() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -169,6 +174,10 @@ class _ReviewPageState extends State<ReviewPage> {
     List<String> examples,
     String synonyms,
   ) async {
+    if (_currentVoice != null) {
+      await flutterTts.setVoice(_currentVoice!);
+    }
+
     String article = "a";
     if (type.isNotEmpty) {
       String firstLetter = type.trim().substring(0, 1).toLowerCase();
@@ -186,16 +195,9 @@ class _ReviewPageState extends State<ReviewPage> {
           : " The examples are: ${examples.join(". ")}";
     }
 
-    String synonymsPart = "";
-    if (synonyms.trim().isNotEmpty) {
-      synonymsPart = " Its synonyms are: $synonyms.";
-    }
-
-    // FIX 3: Force set the voice again right before speaking
-    // This prevents the OS from resetting to the default voice after inactivity
-    if (_currentVoice != null) {
-      await flutterTts.setVoice(_currentVoice!);
-    }
+    String synonymsPart = synonyms.trim().isNotEmpty
+        ? " Its synonyms are: $synonyms."
+        : "";
 
     await flutterTts.speak("$meaningPart$synonymsPart$exampleText");
   }
@@ -212,11 +214,7 @@ class _ReviewPageState extends State<ReviewPage> {
       updatedItem['is_favorite'] = newStatus;
       _vocabList[indexInList] = updatedItem;
     });
-
-    // Play sound only when marking as favorite
-    if (newStatus == 1) {
-      _playFavoriteSound();
-    }
+    if (newStatus == 1) _playFavoriteSound();
   }
 
   @override
@@ -241,7 +239,7 @@ class _ReviewPageState extends State<ReviewPage> {
       ),
       body: _vocabList.isEmpty
           ? const Center(
-              child: Text("No vocabulary found. Please add some first."),
+              child: Text("No vocabulary found for current selection."),
             )
           : SafeArea(
               child: PageView.builder(
@@ -306,7 +304,6 @@ class _ReviewPageState extends State<ReviewPage> {
                         icon: Icon(
                           isFav ? Icons.star : Icons.star_border,
                           color: isFav ? Colors.yellow : Colors.white,
-                          size: 30,
                         ),
                         onPressed: () => _toggleFav(indexInList, item),
                       ),
@@ -374,7 +371,6 @@ class _ReviewPageState extends State<ReviewPage> {
                       style: const TextStyle(fontSize: 18, height: 1.4),
                     ),
                     const SizedBox(height: 20),
-
                     if (synonyms.isNotEmpty) ...[
                       const Text(
                         "Synonyms",
@@ -384,14 +380,9 @@ class _ReviewPageState extends State<ReviewPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        synonyms,
-                        style: const TextStyle(fontSize: 16, height: 1.3),
-                      ),
+                      Text(synonyms, style: const TextStyle(fontSize: 16)),
                       const SizedBox(height: 20),
                     ],
-
-                    const SizedBox(height: 5),
                     if (examplesList.isNotEmpty) ...[
                       const Text(
                         "Examples",
@@ -404,32 +395,17 @@ class _ReviewPageState extends State<ReviewPage> {
                       ...examplesList.map(
                         (example) => Padding(
                           padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                "• ",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  example,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontStyle: FontStyle.italic,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            "• $example",
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontStyle: FontStyle.italic,
+                            ),
                           ),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20), // Bottom spacing restored
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),

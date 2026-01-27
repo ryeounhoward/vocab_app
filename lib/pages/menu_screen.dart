@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vocab_app/pages/idiom_review_page.dart';
-import 'package:vocab_app/pages/notes_page.dart';
 import 'package:vocab_app/pages/review_page.dart';
-
+import 'package:vocab_app/services/refresh_signal.dart';
 import '../database/db_helper.dart';
 
 class MenuPage extends StatefulWidget {
@@ -22,10 +21,25 @@ class _MenuPageState extends State<MenuPage> {
   void initState() {
     super.initState();
     _loadSelectedGroups();
+    // Listen for the signal from the Sort page
+    DataRefreshSignal.refreshNotifier.addListener(_onGlobalRefresh);
+  }
+
+  void _onGlobalRefresh() {
+    if (mounted) {
+      _loadSelectedGroups();
+    }
+  }
+
+  @override
+  void dispose() {
+    DataRefreshSignal.refreshNotifier.removeListener(_onGlobalRefresh);
+    super.dispose();
   }
 
   Future<void> _loadSelectedGroups() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload(); // Force sync
 
     final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
     final bool useAllIdioms = prefs.getBool('quiz_use_all_idioms') ?? true;
@@ -34,25 +48,31 @@ class _MenuPageState extends State<MenuPage> {
     final int? idiomGroupId = prefs.getInt('quiz_selected_idiom_group_id');
 
     String? wordName;
-    if (!useAllWords && wordGroupId != null) {
+    if (useAllWords) {
+      wordName = "All Words";
+    } else if (wordGroupId != null) {
       final groups = await _dbHelper.getAllWordGroups();
       final group = groups.firstWhere(
-        (g) => g['id'] == wordGroupId,
+        (g) => g['id'].toString() == wordGroupId.toString(),
         orElse: () => <String, dynamic>{},
       );
-      final name = (group['name'] ?? '').toString().trim();
-      if (name.isNotEmpty) wordName = name;
+      wordName = group['name']?.toString() ?? "Selected Words";
+    } else {
+      wordName = "Selected Words";
     }
 
     String? idiomName;
-    if (!useAllIdioms && idiomGroupId != null) {
+    if (useAllIdioms) {
+      idiomName = "All Idioms";
+    } else if (idiomGroupId != null) {
       final groups = await _dbHelper.getAllIdiomGroups();
       final group = groups.firstWhere(
-        (g) => g['id'] == idiomGroupId,
+        (g) => g['id'].toString() == idiomGroupId.toString(),
         orElse: () => <String, dynamic>{},
       );
-      final name = (group['name'] ?? '').toString().trim();
-      if (name.isNotEmpty) idiomName = name;
+      idiomName = group['name']?.toString() ?? "Selected Idioms";
+    } else {
+      idiomName = "Selected Idioms";
     }
 
     if (!mounted) return;
@@ -62,20 +82,16 @@ class _MenuPageState extends State<MenuPage> {
     });
   }
 
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        // LayoutBuilder gives us the exact height of the safe area
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // We calculate the height so that exactly 2 cards fit in the view.
-            // (Total Height / 2). The 3rd card will be off-screen until scrolled.
             final double cardHeight = constraints.maxHeight / 2;
-
             return SingleChildScrollView(
               child: Column(
                 children: [
-                  // 1. WORDS CARD
                   SizedBox(
                     height: cardHeight,
                     child: MenuCard(
@@ -83,18 +99,14 @@ class _MenuPageState extends State<MenuPage> {
                       subtitle: _wordGroupName,
                       imagePath: "assets/images/vocabulary.jpg",
                       color: Colors.blueAccent,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ReviewPage(),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ReviewPage(),
+                        ),
+                      ),
                     ),
                   ),
-
-                  // 2. IDIOMS CARD
                   SizedBox(
                     height: cardHeight,
                     child: MenuCard(
@@ -102,33 +114,14 @@ class _MenuPageState extends State<MenuPage> {
                       subtitle: _idiomGroupName,
                       imagePath: "assets/images/idioms.jpg",
                       color: Colors.orangeAccent,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const IdiomReviewPage(),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const IdiomReviewPage(),
+                        ),
+                      ),
                     ),
                   ),
-
-                  // SizedBox(
-                  //   height: cardHeight,
-                  //   child: MenuCard(
-                  //     title: "Conversation",
-                  //     imagePath: "assets/images/notes.jpg",
-                  //     color: Colors.greenAccent,
-                  //     onTap: () {
-                  //       Navigator.push(
-                  //         context,
-                  //         MaterialPageRoute(
-                  //           builder: (context) => const NotesPage(),
-                  //         ),
-                  //       );
-                  //     },
-                  //   ),
-                  // ),
                 ],
               ),
             );
@@ -138,6 +131,8 @@ class _MenuPageState extends State<MenuPage> {
     );
   }
 }
+
+// Keep your MenuCard class as is...
 
 class MenuCard extends StatelessWidget {
   final String title;
@@ -176,11 +171,8 @@ class MenuCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Background Image
               Image.asset(imagePath, fit: BoxFit.cover),
-              // Overlay for readability
               Container(color: Colors.black.withOpacity(0.4)),
-              // Title Text
               Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -194,12 +186,14 @@ class MenuCard extends StatelessWidget {
                         letterSpacing: 2,
                       ),
                     ),
+                    // Display group name in brackets if it exists
                     if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
                       Text(
                         '(${subtitle!.trim()})',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: Colors.white70,
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,

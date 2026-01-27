@@ -30,7 +30,7 @@ void callbackDispatcher() {
 }
 
 // ==========================================================
-// CORRECTED GITHUB AUTO-UPDATE SERVICE
+// GITHUB AUTO-UPDATE SERVICE
 // ==========================================================
 class GitHubUpdateService {
   static const String owner = "ryeounhoward";
@@ -100,7 +100,6 @@ class GitHubUpdateService {
   }
 }
 
-// UI widget for the progress bar
 class _DownloadDialog extends StatefulWidget {
   final String url;
   const _DownloadDialog({required this.url});
@@ -185,6 +184,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     );
   }
 }
+
 // ==========================================================
 
 void main() async {
@@ -239,18 +239,9 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   int _currentIndex = 0;
 
-  final List<Widget> _pages = [
-    const MenuPage(),
-    const QuizPage(),
-    const VocabularyTestPage(),
-    const NotesPage(),
-    const SettingsPage(),
-  ];
-
   @override
   void initState() {
     super.initState();
-    // CALL THE UPDATE SERVICE
     WidgetsBinding.instance.addPostFrameCallback((_) {
       GitHubUpdateService.checkForUpdates(context);
     });
@@ -258,8 +249,22 @@ class _MainContainerState extends State<MainContainer> {
 
   @override
   Widget build(BuildContext context) {
+    // We define the pages list INSIDE the build method.
+    // This allows us to pass the dynamic _currentIndex to VocabularyTestPage.
+    final List<Widget> pages = [
+      const MenuPage(),
+      const QuizPage(),
+      VocabularyTestPage(
+        parentTabIndex: _currentIndex,
+        myTabIndex: 2, // Index 2 is the Quiz/VocabularyTest tab
+      ),
+      const NotesPage(),
+      const SettingsPage(),
+    ];
+
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _pages),
+      // IndexedStack keeps all pages alive, but we only show one at a time.
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),

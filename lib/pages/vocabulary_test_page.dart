@@ -8,9 +8,17 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import 'quiz_history_page.dart';
+import 'package:vocab_app/services/refresh_signal.dart';
 
 class VocabularyTestPage extends StatefulWidget {
-  const VocabularyTestPage({super.key});
+  final int parentTabIndex; // Current tab active in MainContainer
+  final int myTabIndex;
+
+  const VocabularyTestPage({
+    super.key,
+    required this.parentTabIndex,
+    required this.myTabIndex,
+  });
 
   @override
   State<VocabularyTestPage> createState() => _VocabularyTestPageState();
@@ -23,6 +31,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
   List<Map<String, dynamic>> _allWordsPool = [];
   int _currentIndex = 0;
   int _score = 0;
+  bool _refreshCheckPending = false;
 
   // In-memory caches to avoid re-querying the DB on every restart.
   // (This removes the loading spinner in most restarts.)
@@ -117,6 +126,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
     super.initState();
     _initTts();
     _initQuizPage();
+    DataRefreshSignal.refreshNotifier.addListener(_handleSignalRefresh);
   }
 
   String _buildSelectionSignature(SharedPreferences prefs, String mode) {
@@ -142,11 +152,86 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
   @override
   void dispose() {
+    // DataRefreshSignal.refreshNotifier.removeListener(_handleSignalRefresh);
     _saveSession();
     flutterTts.stop();
     _timer?.cancel();
     _answerController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(VocabularyTestPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the user just switched TO this tab and a refresh is pending, check it now
+    if (widget.parentTabIndex == widget.myTabIndex && _refreshCheckPending) {
+      _handleSignalRefresh();
+    }
+  }
+
+  void _handleSignalRefresh() async {
+    if (!mounted) return;
+
+    // 1. Check if this tab is currently active
+    bool isCurrentTab = widget.parentTabIndex == widget.myTabIndex;
+
+    // 2. Check if a settings page is pushed on top of the main container
+    bool isTopRoute = ModalRoute.of(context)?.isCurrent ?? false;
+
+    // If we are NOT on the quiz tab OR we are in a sub-settings menu,
+    // just mark that we need to check later.
+    if (!isCurrentTab || !isTopRoute) {
+      _refreshCheckPending = true;
+      return;
+    }
+
+    _refreshCheckPending = false; // Reset the flag since we are handling it now
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
+    final String requestedMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+    final String newSignature = _buildSelectionSignature(prefs, requestedMode);
+
+    if (newSignature == _selectionSignature) return;
+
+    bool hasProgress = _currentIndex > 0 || _isAnswered || _elapsedSeconds > 5;
+
+    if (_quizData.isNotEmpty && hasProgress && !_timeOver) {
+      _showDataChangeConfirmation();
+    } else {
+      _generateQuizFresh();
+    }
+  }
+
+  void _showDataChangeConfirmation() {
+    // Safety check: don't show if already showing
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Settings Changed"),
+        content: const Text("Would you like to start a new quiz?"),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _refreshCheckPending = false;
+              Navigator.pop(ctx);
+            },
+            child: const Text("KEEP CURRENT"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              _refreshCheckPending = false;
+              Navigator.pop(ctx);
+              _timer?.cancel();
+              _generateQuizFresh();
+            },
+            child: const Text("NEW QUIZ"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _initTts() async {
@@ -342,9 +427,12 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
   Future<void> _generateQuizInternal({required bool forceReload}) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
 
     // Load quiz mode early so we know which table we need.
     final String requestedMode = prefs.getString('quiz_mode') ?? 'desc_to_word';
+
+    _selectionSignature = _buildSelectionSignature(prefs, requestedMode);
 
     final bool isIdiomQuiz =
         requestedMode == 'idiom_desc_to_idiom' ||
@@ -1722,10 +1810,31 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
 
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.all(30.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: [Text(message, textAlign: TextAlign.center)],
+            children: [
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 24),
+              // --- RELOAD BUTTON ---
+              ElevatedButton.icon(
+                onPressed: _generateQuizFresh,
+                icon: const Icon(Icons.refresh),
+                label: const Text("RELOAD QUIZ"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );

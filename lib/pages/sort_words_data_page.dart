@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vocab_app/services/refresh_signal.dart';
 
 import '../database/db_helper.dart';
 
@@ -212,52 +213,36 @@ class _SortWordsDataPageState extends State<SortWordsDataPage> {
   Future<void> _saveSelections() async {
     final prefs = await SharedPreferences.getInstance();
 
-    if (_useAllWords || (_selectedGroupId == null && _selectedIds.isEmpty)) {
-      await _dbHelper.removePreference('quiz_use_all_words');
-      await _dbHelper.removePreference('quiz_selected_word_ids');
-      await _dbHelper.removePreference('quiz_selected_word_group_id');
+    // 1. Save "Use All" status
+    await prefs.setBool('quiz_use_all_words', _useAllWords);
+    await _dbHelper.setPreference(
+      'quiz_use_all_words',
+      _useAllWords ? 'true' : 'false',
+    );
 
-      await prefs.remove('quiz_use_all_words');
-      await prefs.remove('quiz_selected_word_ids');
+    if (_useAllWords) {
+      // If use all is on, clear the group preference
       await prefs.remove('quiz_selected_word_group_id');
+      await _dbHelper.removePreference('quiz_selected_word_group_id');
     } else {
-      // If a group is selected, always use that group's words as the
-      // selection for displaying data.
-      Set<int> finalIds = _selectedIds;
+      // If a group is selected, save the ID
       if (_selectedGroupId != null) {
-        finalIds = await _dbHelper.getWordIdsForGroup(_selectedGroupId!);
-      }
-
-      await _dbHelper.setPreference(
-        'quiz_selected_word_ids',
-        finalIds.map((id) => id.toString()).join(','),
-      );
-
-      await prefs.setStringList(
-        'quiz_selected_word_ids',
-        finalIds.map((id) => id.toString()).toList(),
-      );
-
-      if (_selectedGroupId != null) {
+        await prefs.setInt('quiz_selected_word_group_id', _selectedGroupId!);
         await _dbHelper.setPreference(
           'quiz_selected_word_group_id',
           _selectedGroupId!.toString(),
         );
-
-        await prefs.setInt('quiz_selected_word_group_id', _selectedGroupId!);
-      } else {
-        await _dbHelper.removePreference('quiz_selected_word_group_id');
-
-        await prefs.remove('quiz_selected_word_group_id');
       }
 
-      await _dbHelper.setPreference(
-        'quiz_use_all_words',
-        _useAllWords ? 'true' : 'false',
+      // Save individual selected IDs if necessary
+      await prefs.setStringList(
+        'quiz_selected_word_ids',
+        _selectedIds.map((id) => id.toString()).toList(),
       );
-
-      await prefs.setBool('quiz_use_all_words', _useAllWords);
     }
+
+    // 2. RING THE BELL (This triggers MenuPage to update)
+    DataRefreshSignal.sendRefreshSignal();
 
     if (!mounted) return;
     Navigator.pop(context, true);

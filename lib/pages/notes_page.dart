@@ -70,7 +70,13 @@ class _NotesPageState extends State<NotesPage> {
         "Nov",
         "Dec",
       ];
-      return "${months[dt.month - 1]} ${dt.day}, ${dt.year}";
+      String hour = (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(
+        2,
+        '0',
+      );
+      String minute = dt.minute.toString().padLeft(2, '0');
+      String ampm = dt.hour < 12 ? 'AM' : 'PM';
+      return "${months[dt.month - 1]} ${dt.day}, ${dt.year} $hour:$minute $ampm";
     } catch (e) {
       return "";
     }
