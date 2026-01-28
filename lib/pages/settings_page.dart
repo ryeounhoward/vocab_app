@@ -72,7 +72,6 @@ class _SettingsPageState extends State<SettingsPage> {
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () => _navigateTo(context, const QuizHistoryPage()),
             ),
-            const Divider(),
             ListTile(
               leading: const Icon(Icons.edit, color: Colors.indigo),
               title: const Text("Manage Vocabulary"),
@@ -98,8 +97,6 @@ class _SettingsPageState extends State<SettingsPage> {
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () => _navigateTo(context, SortDataPage()),
             ),
-
-            const Divider(),
             ListTile(
               leading: const Icon(
                 Icons.notification_important,
@@ -158,8 +155,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 }
               },
             ),
-
-            const Divider(),
             ListTile(
               leading: const Icon(
                 Icons.record_voice_over,

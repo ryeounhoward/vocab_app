@@ -93,7 +93,8 @@ class _QuizHistoryPageState extends State<QuizHistoryPage> {
               child: Text('No quiz history yet.', textAlign: TextAlign.center),
             )
           : ListView.separated(
-              padding: const EdgeInsets.all(16),
+              // ADDED BOTTOM PADDING HERE (80)
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
               itemCount: _history.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
@@ -102,9 +103,6 @@ class _QuizHistoryPageState extends State<QuizHistoryPage> {
                 final int totalItems = (item['totalItems'] ?? 0) as int;
                 final int durationSeconds =
                     (item['durationSeconds'] ?? 0) as int;
-                final String mode = _modeLabel(
-                  (item['quizMode'] ?? '').toString(),
-                );
                 final String quizLabel =
                     'Quiz ${(item['quizNumber'] ?? '').toString()}';
 
@@ -152,7 +150,6 @@ class _QuizHistoryPageState extends State<QuizHistoryPage> {
 
 class QuizHistoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> historyItem;
-
   const QuizHistoryDetailPage({super.key, required this.historyItem});
 
   @override
@@ -230,9 +227,10 @@ class _QuizHistoryDetailPageState extends State<QuizHistoryDetailPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Quiz Details'), centerTitle: true),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
           children: [
+            const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: Card(
@@ -272,17 +270,11 @@ class _QuizHistoryDetailPageState extends State<QuizHistoryDetailPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Align(alignment: Alignment.centerLeft),
-            const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _showDetails = !_showDetails;
-                    });
-                  },
+                  onPressed: () => setState(() => _showDetails = !_showDetails),
                   child: Text(
                     _showDetails ? 'Collapse Details' : 'Show Details',
                   ),
@@ -351,13 +343,11 @@ class _QuizHistoryDetailPageState extends State<QuizHistoryDetailPage> {
             Expanded(
               child: items.isEmpty
                   ? const Center(
-                      child: Text(
-                        'No answered items were recorded for this quiz.',
-                        textAlign: TextAlign.center,
-                      ),
+                      child: Text('No recorded items for this quiz.'),
                     )
                   : ListView.separated(
-                      padding: const EdgeInsets.only(bottom: 80),
+                      // ADDED BOTTOM PADDING HERE (100)
+                      padding: const EdgeInsets.only(bottom: 100),
                       itemCount: items.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {

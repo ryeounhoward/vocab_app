@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart'; // <--- 1. NEW IMPORT ADDED HERE
 import 'package:workmanager/workmanager.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -76,8 +77,10 @@ class GitHubUpdateService {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text("New Update Available"),
-        content: Text("Version $version is ready. Download and install now?"),
+        title: Text("Update to $version?"),
+        content: Text(
+          "The app will download the new version and automatically open the installer.",
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -92,7 +95,7 @@ class GitHubUpdateService {
                 builder: (context) => _DownloadDialog(url: url),
               );
             },
-            child: const Text("Update Now"),
+            child: const Text("Download & Install"),
           ),
         ],
       ),
@@ -249,44 +252,56 @@ class _MainContainerState extends State<MainContainer> {
 
   @override
   Widget build(BuildContext context) {
-    // We define the pages list INSIDE the build method.
-    // This allows us to pass the dynamic _currentIndex to VocabularyTestPage.
     final List<Widget> pages = [
       const MenuPage(),
       const QuizPage(),
-      VocabularyTestPage(
-        parentTabIndex: _currentIndex,
-        myTabIndex: 2, // Index 2 is the Quiz/VocabularyTest tab
-      ),
+      VocabularyTestPage(parentTabIndex: _currentIndex, myTabIndex: 2),
       const NotesPage(),
       const SettingsPage(),
     ];
 
-    return Scaffold(
-      // IndexedStack keeps all pages alive, but we only show one at a time.
-      body: IndexedStack(index: _currentIndex, children: pages),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.indigo,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.rate_review),
-            label: 'Review',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.style), label: 'Practice'),
-          BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Quiz'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.note_alt_outlined),
-            label: 'Notes',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+    // 2. WRAP WITH POPSCOPE TO PREVENT BLACK SCREEN
+    return PopScope(
+      canPop: false, // We handle the pop manually
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        // If not on first tab, go to first tab
+        if (_currentIndex != 0) {
+          setState(() {
+            _currentIndex = 0;
+          });
+        }
+        // If already on first tab, exit to Android Home Screen
+        else {
+          await SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        body: IndexedStack(index: _currentIndex, children: pages),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          type: BottomNavigationBarType.fixed,
+          selectedItemColor: Colors.indigo,
+          unselectedItemColor: Colors.grey,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.rate_review),
+              label: 'Review',
+            ),
+            BottomNavigationBarItem(icon: Icon(Icons.style), label: 'Practice'),
+            BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Quiz'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.note_alt_outlined),
+              label: 'Notes',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings),
+              label: 'Settings',
+            ),
+          ],
+        ),
       ),
     );
   }

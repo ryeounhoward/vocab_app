@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import '../database/db_helper.dart';
 
 // ---------------------------------------------------------
-// 1. NOTES LIST PAGE
+// 1. NOTES LIST PAGE (KEPT EXACTLY AS YOURS)
 // ---------------------------------------------------------
 class NotesPage extends StatefulWidget {
   const NotesPage({Key? key}) : super(key: key);
@@ -51,7 +53,6 @@ class _NotesPageState extends State<NotesPage> {
     });
   }
 
-  // --- Date Formatting Helper ---
   String _formatDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return "";
     try {
@@ -352,7 +353,7 @@ class _NotesPageState extends State<NotesPage> {
 }
 
 // ---------------------------------------------------------
-// 2. NOTE EDITOR PAGE
+// 2. NOTE EDITOR PAGE (FIXED FOR VERSION 11.5.0)
 // ---------------------------------------------------------
 class NoteEditor extends StatefulWidget {
   final Map<String, dynamic>? note;
@@ -391,7 +392,6 @@ class _NoteEditorState extends State<NoteEditor> {
     }
   }
 
-  // Helper to check for unsaved changes
   bool _hasUnsavedChanges() {
     final currentContent = jsonEncode(
       _quillController.document.toDelta().toJson(),
@@ -549,14 +549,15 @@ class _NoteEditorState extends State<NoteEditor> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: quill.QuillEditor.basic(
                   controller: _quillController,
-                  config: const quill.QuillEditorConfig(
+                  config: quill.QuillEditorConfig(
                     placeholder: "Write something...",
+                    // Allows images to display in the editor
+                    embedBuilders: FlutterQuillEmbeds.editorBuilders(),
                   ),
                 ),
               ),
             ),
 
-            // TOOLBAR FIX: Wrapped in SafeArea to prevent overlap with Android Bottom Bar
             if (_showToolbar)
               SafeArea(
                 child: Container(
@@ -578,10 +579,10 @@ class _NoteEditorState extends State<NoteEditor> {
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: SizedBox(
-                      width: 1100,
+                      width: 1200,
                       child: quill.QuillSimpleToolbar(
                         controller: _quillController,
-                        config: const quill.QuillSimpleToolbarConfig(
+                        config: quill.QuillSimpleToolbarConfig(
                           multiRowsDisplay: false,
                           showUndo: false,
                           showRedo: false,
@@ -589,6 +590,9 @@ class _NoteEditorState extends State<NoteEditor> {
                           showSubscript: false,
                           showSuperscript: false,
                           showInlineCode: false,
+                          // FIX: In version 11+, showImageButton is removed.
+                          // Calling toolbarButtons() automatically adds the Image icon.
+                          embedButtons: FlutterQuillEmbeds.toolbarButtons(),
                         ),
                       ),
                     ),
