@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:flutter_quill_extensions/src/common/utils/element_utils/element_utils.dart'
-    show getElementAttributes;
+    show ElementSize, getElementAttributes;
 import 'package:flutter_quill_extensions/src/editor/image/image_menu.dart'
     show ImageOptionsMenu;
 import 'package:flutter_quill_extensions/src/editor/image/widgets/image.dart'
@@ -655,42 +655,275 @@ class ZoomableQuillEditorImageEmbedBuilder extends quill.EmbedBuilder {
       width: imageSize.width,
     );
 
-    final zoomable = ClipRect(
-      child: InteractiveViewer(
-        panEnabled: true,
-        scaleEnabled: true,
-        minScale: 1.0,
-        maxScale: 5.0,
-        child: imageWidget,
+    return _InlineResizableZoomableImageEmbed(
+      controller: embedContext.controller,
+      node: embedContext.node,
+      readOnly: embedContext.readOnly,
+      config: config,
+      imageSource: imageSource,
+      imageSize: imageSize,
+      margin: margin,
+      alignment: alignment,
+      imageWidget: imageWidget,
+    );
+  }
+}
+
+class _InlineResizableZoomableImageEmbed extends StatefulWidget {
+  const _InlineResizableZoomableImageEmbed({
+    required this.controller,
+    required this.node,
+    required this.readOnly,
+    required this.config,
+    required this.imageSource,
+    required this.imageSize,
+    required this.margin,
+    required this.alignment,
+    required this.imageWidget,
+  });
+
+  final quill.QuillController controller;
+  final quill.Node node;
+  final bool readOnly;
+  final QuillEditorImageEmbedConfig config;
+  final String imageSource;
+  final ElementSize imageSize;
+  final double? margin;
+  final Alignment alignment;
+  final Image imageWidget;
+
+  @override
+  State<_InlineResizableZoomableImageEmbed> createState() =>
+      _InlineResizableZoomableImageEmbedState();
+}
+
+class _InlineResizableZoomableImageEmbedState
+    extends State<_InlineResizableZoomableImageEmbed> {
+  bool _showHandles = false;
+  double? _width;
+  double? _height;
+
+  double? _startWidth;
+  double? _startHeight;
+
+  @override
+  void initState() {
+    super.initState();
+    _width = widget.imageSize.width;
+    _height = widget.imageSize.height;
+  }
+
+  void _toggleHandles() {
+    if (widget.readOnly) return;
+    setState(() => _showHandles = !_showHandles);
+  }
+
+  void _openImageMenu() {
+    showDialog(
+      context: context,
+      builder: (_) => ImageOptionsMenu(
+        controller: widget.controller,
+        config: widget.config,
+        imageSource: widget.imageSource,
+        imageSize: ElementSize(_width, _height),
+        readOnly: widget.readOnly,
+        imageProvider: widget.imageWidget.image,
       ),
     );
+  }
 
-    Widget content = zoomable;
-    if (margin != null) {
-      content = Padding(padding: EdgeInsets.all(margin), child: content);
+  double _fallbackInitialWidth(BoxConstraints constraints) {
+    final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 320;
+    final w = _width ?? 240;
+    return w.clamp(80.0, maxWidth).toDouble();
+  }
+
+  double _fallbackInitialHeight(BoxConstraints constraints) {
+    final maxHeight = constraints.maxHeight.isFinite
+        ? constraints.maxHeight
+        : MediaQuery.sizeOf(context).height;
+    final h = _height ?? 180;
+    return h.clamp(80.0, maxHeight).toDouble();
+  }
+
+  void _applySizeToDocument({required double width, required double height}) {
+    final selectionBefore = widget.controller.selection;
+    final embedOffset = widget.node.documentOffset;
+
+    // Select the embed (length=1) so formatting applies to it.
+    widget.controller.updateSelection(
+      TextSelection(baseOffset: embedOffset, extentOffset: embedOffset + 1),
+      quill.ChangeSource.local,
+    );
+
+    widget.controller.formatSelection(
+      quill.Attribute.clone(quill.Attribute.width, width.toStringAsFixed(0)),
+    );
+    widget.controller.formatSelection(
+      quill.Attribute.clone(quill.Attribute.height, height.toStringAsFixed(0)),
+    );
+
+    // Restore the user's selection.
+    widget.controller.updateSelection(
+      selectionBefore,
+      quill.ChangeSource.local,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineResizableZoomableImageEmbed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Keep in sync when size is changed by the menu or external edits.
+    final newWidth = widget.imageSize.width;
+    final newHeight = widget.imageSize.height;
+    if (newWidth != _width || newHeight != _height) {
+      _width = newWidth;
+      _height = newHeight;
     }
+  }
 
-    return GestureDetector(
-      onTap: () {
-        final onImageClicked = config.onImageClicked;
-        if (onImageClicked != null) {
-          onImageClicked(imageSource);
-          return;
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final effectiveWidth = _fallbackInitialWidth(constraints);
+        final effectiveHeight = _fallbackInitialHeight(constraints);
+
+        final image = SizedBox(
+          width: effectiveWidth,
+          height: effectiveHeight,
+          child: FittedBox(
+            fit: BoxFit.contain,
+            alignment: widget.alignment,
+            child: widget.imageWidget,
+          ),
+        );
+
+        final zoomable = ClipRect(
+          child: InteractiveViewer(
+            panEnabled: true,
+            scaleEnabled: true,
+            minScale: 1.0,
+            maxScale: 5.0,
+            child: image,
+          ),
+        );
+
+        Widget content = zoomable;
+        if (widget.margin != null) {
+          content = Padding(
+            padding: EdgeInsets.all(widget.margin!),
+            child: content,
+          );
         }
 
-        showDialog(
-          context: context,
-          builder: (_) => ImageOptionsMenu(
-            controller: embedContext.controller,
-            config: config,
-            imageSource: imageSource,
-            imageSize: imageSize,
-            readOnly: embedContext.readOnly,
-            imageProvider: imageWidget.image,
+        return GestureDetector(
+          onTap: _toggleHandles,
+          onLongPress: _openImageMenu,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              if (_showHandles)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.indigo, width: 2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ),
+              content,
+              if (_showHandles && !widget.readOnly) ...[
+                Positioned(
+                  right: -6,
+                  bottom: -6,
+                  child: _ResizeHandle(
+                    onPanStart: () {
+                      _startWidth = effectiveWidth;
+                      _startHeight = effectiveHeight;
+                    },
+                    onPanUpdate: (delta) {
+                      final startW = _startWidth ?? effectiveWidth;
+                      final startH = _startHeight ?? effectiveHeight;
+
+                      final maxW = constraints.maxWidth.isFinite
+                          ? constraints.maxWidth
+                          : startW + 2000;
+                      final maxH = MediaQuery.sizeOf(context).height;
+
+                      final nextW = (startW + delta.dx).clamp(80.0, maxW);
+                      final nextH = (startH + delta.dy).clamp(80.0, maxH);
+
+                      setState(() {
+                        _width = nextW;
+                        _height = nextH;
+                      });
+                    },
+                    onPanEnd: () {
+                      final w = _width ?? effectiveWidth;
+                      final h = _height ?? effectiveHeight;
+                      _applySizeToDocument(width: w, height: h);
+                    },
+                  ),
+                ),
+                Positioned(
+                  top: -10,
+                  right: -10,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: IconButton(
+                      tooltip: 'Image menu',
+                      onPressed: _openImageMenu,
+                      icon: const Icon(Icons.more_vert, size: 20),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         );
       },
-      child: content,
+    );
+  }
+}
+
+class _ResizeHandle extends StatelessWidget {
+  const _ResizeHandle({
+    required this.onPanStart,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
+
+  final VoidCallback onPanStart;
+  final void Function(Offset delta) onPanUpdate;
+  final VoidCallback onPanEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (_) => onPanStart(),
+      onPanUpdate: (details) => onPanUpdate(details.delta),
+      onPanEnd: (_) => onPanEnd(),
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.indigo, width: 2),
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 2,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+        child: const Icon(Icons.open_in_full, size: 14, color: Colors.indigo),
+      ),
     );
   }
 }
