@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 // Core archive types
 import 'package:archive/archive_io.dart'; // For ZipFileEncoder streaming
 import 'package:path/path.dart' as p;
@@ -20,6 +21,25 @@ class BackupRestorePage extends StatefulWidget {
 }
 
 class _BackupRestorePageState extends State<BackupRestorePage> {
+  GoogleSignInAccount? _googleAccount;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGoogleAccount();
+  }
+
+  Future<void> _fetchGoogleAccount() async {
+    final account = await _googleDriveService.ensureSignedIn(
+      interactive: false,
+    );
+    if (mounted) {
+      setState(() {
+        _googleAccount = account;
+      });
+    }
+  }
+
   final DBHelper _dbHelper = DBHelper();
   final GoogleDriveService _googleDriveService = GoogleDriveService();
 
@@ -449,16 +469,19 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     String imagesPath = await _getLocalImagesPath();
     Directory imgDir = Directory(imagesPath);
     if (await imgDir.exists()) {
-      List<File> files = imgDir.listSync().whereType<File>().toList(
-        growable: false,
-      );
+      final List<File> files = await imgDir
+          .list(followLinks: false)
+          .where((entity) => entity is File)
+          .cast<File>()
+          .toList();
 
       final int totalFiles = files.length;
       int processed = 0;
 
       for (final File file in files) {
         processed++;
-        encoder.addFile(file);
+        final String filename = p.basename(file.path);
+        await encoder.addFile(file, 'images/$filename');
 
         if (totalFiles > 0) {
           final double photoFraction = processed / totalFiles;
@@ -691,7 +714,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   Future<void> _exportFullZipToGoogleDrive() async {
     try {
-      await _showLoadingDialog("Signing in to Google Drive...");
       final account = await _googleDriveService.ensureSignedIn(
         interactive: true,
       );
@@ -700,6 +722,8 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         return;
       }
 
+      await _showLoadingDialog("Preparing full backup for Google Drive...");
+
       _updateLoadingProgress(0.05, 'Preparing backup');
       final File? tempZipFile = await _buildFullBackupZipToTemp(
         progressLabel: 'Preparing backup',
@@ -707,8 +731,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       if (tempZipFile == null) return;
 
       _updateLoadingProgress(0.97, 'Uploading to Google Drive');
-      await _googleDriveService.uploadFile(tempZipFile, _fullBackupZipFileName);
-      _updateLoadingProgress(1.0, 'Uploading to Google Drive');
+      await _googleDriveService.uploadFile(
+        tempZipFile,
+        _fullBackupZipFileName,
+        onProgress: (fraction) {
+          _updateLoadingProgress(fraction, 'Uploading to Google Drive');
+        },
+      );
 
       _showSnackBar("Backup uploaded to Google Drive!");
     } catch (e) {
@@ -721,7 +750,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<void> _importFullZipFromGoogleDrive() async {
     File? downloaded;
     try {
-      await _showLoadingDialog("Signing in to Google Drive...");
       final account = await _googleDriveService.ensureSignedIn(
         interactive: true,
       );
@@ -730,15 +758,15 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         return;
       }
 
-      _updateLoadingProgress(0.05, 'Downloading from Google Drive');
-      _hideLoadingDialog();
-
       await _showLoadingDialog("Downloading backup from Google Drive...");
       final tempDir = await getTemporaryDirectory();
       final String savePath = p.join(tempDir.path, _fullBackupZipFileName);
       downloaded = await _googleDriveService.downloadFile(
         _fullBackupZipFileName,
         savePath,
+        onProgress: (fraction) {
+          _updateLoadingProgress(fraction, 'Downloading from Google Drive');
+        },
       );
     } catch (e) {
       _showSnackBar("Google Drive Import Error: $e");
@@ -916,81 +944,119 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Backup & Restore"), centerTitle: true),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text(
-            "Full Backup (Database + Photos)",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-          ),
-          const SizedBox(height: 10),
-          _buildSvgCard(
-            "Export Full to Google Drive",
-            "Upload full backup ZIP to Drive",
-            _googleDriveIconAsset,
-            _exportFullZipToGoogleDrive,
-          ),
-          _buildSvgCard(
-            "Import Full from Google Drive",
-            "Download and restore the backup ZIP",
-            _googleDriveIconAsset,
-            _importFullZipFromGoogleDrive,
-          ),
-          _buildCard(
-            "Export Full ZIP",
-            "Save everything including images",
-            Icons.all_inclusive,
-            Colors.deepPurple,
-            _exportToZip,
-          ),
-          _buildCard(
-            "Import Full ZIP",
-            "Restore everything from ZIP",
-            Icons.unarchive,
-            Colors.orange,
-            _importFromZip,
-          ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12.0),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                "Full Backup (Online)",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Google Drive account label
+              _buildSvgCard(
+                "Export Full to Google Drive",
+                "Upload full backup ZIP to Drive",
+                _googleDriveIconAsset,
+                () async {
+                  if (_googleAccount == null) {
+                    await _googleDriveService.ensureSignedIn(interactive: true);
+                    await _fetchGoogleAccount();
+                  } else {
+                    await _exportFullZipToGoogleDrive();
+                  }
+                },
+              ),
+              _buildSvgCard(
+                "Import Full from Google Drive",
+                "Download and restore the backup ZIP",
+                _googleDriveIconAsset,
+                () async {
+                  if (_googleAccount == null) {
+                    await _googleDriveService.ensureSignedIn(interactive: true);
+                    await _fetchGoogleAccount();
+                  } else {
+                    await _importFullZipFromGoogleDrive();
+                  }
+                },
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                "Full Backup (Offline)",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildCard(
+                "Export Full ZIP",
+                "Save everything including images",
+                Icons.all_inclusive,
+                Colors.deepPurple,
+                _exportToZip,
+              ),
+              _buildCard(
+                "Import Full ZIP",
+                "Restore everything from ZIP",
+                Icons.unarchive,
+                Colors.orange,
+                _importFromZip,
+              ),
 
-          const Text(
-            "Legacy Backup (Data Only)",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-          ),
-          const SizedBox(height: 10),
-          _buildCard(
-            "Export JSON",
-            "Save only words and idioms",
-            Icons.file_upload,
-            Colors.blue,
-            _exportData,
-          ),
-          _buildCard(
-            "Import JSON",
-            "Restore from a JSON file",
-            Icons.file_download,
-            Colors.green,
-            _importData,
-          ),
+              const Text(
+                "Legacy Backup (Data Only)",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildCard(
+                "Export JSON",
+                "Save only words and idioms",
+                Icons.file_upload,
+                Colors.blue,
+                _exportData,
+              ),
+              _buildCard(
+                "Import JSON",
+                "Restore from a JSON file",
+                Icons.file_download,
+                Colors.green,
+                _importData,
+              ),
 
-          const Text(
-            "Notes Backup (JSON)",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+              const Text(
+                "Notes Backup (JSON)",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildCard(
+                "Export Notes JSON",
+                "Save all notes as JSON",
+                Icons.note_add,
+                Colors.teal,
+                _exportNotesToJson,
+              ),
+              _buildCard(
+                "Import Notes JSON",
+                "Restore notes from JSON",
+                Icons.note,
+                Colors.indigo,
+                _importNotesFromJson,
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          _buildCard(
-            "Export Notes JSON",
-            "Save all notes as JSON",
-            Icons.note_add,
-            Colors.teal,
-            _exportNotesToJson,
-          ),
-          _buildCard(
-            "Import Notes JSON",
-            "Restore notes from JSON",
-            Icons.note,
-            Colors.indigo,
-            _importNotesFromJson,
-          ),
-        ],
+        ),
       ),
     );
   }

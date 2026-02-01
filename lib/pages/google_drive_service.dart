@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:google_sign_in/google_sign_in.dart';
@@ -76,21 +77,46 @@ class GoogleDriveService {
   }
 
   // 5. Upload File
-  Future<void> uploadFile(File localFile, String fileName) async {
+  Future<void> uploadFile(
+    File localFile,
+    String fileName, {
+    void Function(double fraction)? onProgress,
+  }) async {
     final driveApi = await getDriveApi();
     if (driveApi == null) return;
 
     // Check if file exists to update instead of duplicate
     final fileList = await driveApi.files.list(
       q: "name = '$fileName' and trashed = false",
-      $fields: "files(id)",
+      orderBy: 'modifiedTime desc',
+      pageSize: 1,
+      $fields: "files(id, modifiedTime)",
     );
 
     final driveFile = drive.File();
     driveFile.name = fileName;
 
     final int length = await localFile.length();
-    final media = drive.Media(localFile.openRead(), length);
+
+    int transferred = 0;
+    int lastPercent = -1;
+    final Stream<List<int>> stream = localFile.openRead().transform(
+      StreamTransformer<List<int>, List<int>>.fromHandlers(
+        handleData: (List<int> data, EventSink<List<int>> sink) {
+          transferred += data.length;
+          if (onProgress != null && length > 0) {
+            final int percent = ((transferred / length) * 100).floor();
+            if (percent != lastPercent) {
+              lastPercent = percent;
+              onProgress((transferred / length).clamp(0.0, 1.0).toDouble());
+            }
+          }
+          sink.add(data);
+        },
+      ),
+    );
+
+    final media = drive.Media(stream, length);
 
     if (fileList.files != null && fileList.files!.isNotEmpty) {
       // Update existing
@@ -102,16 +128,24 @@ class GoogleDriveService {
       await driveApi.files.create(driveFile, uploadMedia: media);
       debugPrint("File created: $fileName");
     }
+
+    onProgress?.call(1.0);
   }
 
   // 6. Download File
-  Future<File?> downloadFile(String fileName, String savePath) async {
+  Future<File?> downloadFile(
+    String fileName,
+    String savePath, {
+    void Function(double fraction)? onProgress,
+  }) async {
     final driveApi = await getDriveApi();
     if (driveApi == null) return null;
 
     final fileList = await driveApi.files.list(
       q: "name = '$fileName' and trashed = false",
-      $fields: "files(id, size)",
+      orderBy: 'modifiedTime desc',
+      pageSize: 1,
+      $fields: "files(id, size, modifiedTime)",
     );
 
     if (fileList.files == null || fileList.files!.isEmpty) {
@@ -119,7 +153,9 @@ class GoogleDriveService {
       return null;
     }
 
-    final fileId = fileList.files!.first.id!;
+    final selected = fileList.files!.first;
+    final fileId = selected.id!;
+    final int totalBytes = int.tryParse(selected.size ?? '') ?? 0;
 
     final drive.Media file =
         await driveApi.files.get(
@@ -131,11 +167,27 @@ class GoogleDriveService {
     final localFile = File(savePath);
 
     final sink = localFile.openWrite();
-    await file.stream.pipe(sink);
+
+    int transferred = 0;
+    int lastPercent = -1;
+    await for (final chunk in file.stream) {
+      sink.add(chunk);
+      transferred += chunk.length;
+
+      if (onProgress != null && totalBytes > 0) {
+        final int percent = ((transferred / totalBytes) * 100).floor();
+        if (percent != lastPercent) {
+          lastPercent = percent;
+          onProgress((transferred / totalBytes).clamp(0.0, 1.0).toDouble());
+        }
+      }
+    }
+
     await sink.flush();
     await sink.close();
 
     debugPrint("File downloaded to $savePath");
+    onProgress?.call(1.0);
     return localFile;
   }
 }

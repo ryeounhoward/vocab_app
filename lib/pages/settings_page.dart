@@ -11,6 +11,7 @@ import 'api_settings_page.dart';
 import 'voice_selection_page.dart';
 import 'practice_preferences_page.dart';
 import 'sort_data_page.dart';
+import 'profile_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -58,6 +59,13 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         body: ListView(
           children: [
+            ListTile(
+              leading: const Icon(Icons.person, color: Colors.indigo),
+              title: const Text("Profile"),
+              subtitle: const Text("Google login and profile info"),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () => _navigateTo(context, const ProfilePage()),
+            ),
             ListTile(
               leading: const Icon(Icons.star, color: Colors.orange),
               title: const Text("Favorites"),
