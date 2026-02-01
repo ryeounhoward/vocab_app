@@ -3,12 +3,14 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:archive/archive.dart'; // Core archive types
+// Core archive types
 import 'package:archive/archive_io.dart'; // For ZipFileEncoder streaming
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
+import 'google_drive_service.dart';
 
 class BackupRestorePage extends StatefulWidget {
   const BackupRestorePage({super.key});
@@ -19,6 +21,11 @@ class BackupRestorePage extends StatefulWidget {
 
 class _BackupRestorePageState extends State<BackupRestorePage> {
   final DBHelper _dbHelper = DBHelper();
+  final GoogleDriveService _googleDriveService = GoogleDriveService();
+
+  static const String _fullBackupZipFileName = 'app_full_backup.zip';
+  static const String _googleDriveIconAsset =
+      'assets/images/Google_Drive_icon_(2020).svg';
 
   String _loadingMessage = '';
 
@@ -338,135 +345,145 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   // 3. NEW ZIP EXPORT (JSON + Photos)
   // ---------------------------------------------------------
+  Future<File?> _buildFullBackupZipToTemp({
+    required String progressLabel,
+  }) async {
+    List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(
+      DBHelper.tableVocab,
+    );
+    List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(
+      DBHelper.tableIdioms,
+    );
+    _updateLoadingProgress(0.05, progressLabel);
+
+    if (vocabData.isEmpty && idiomData.isEmpty) {
+      _showSnackBar("No data found to export");
+      return null;
+    }
+
+    // Read sort-words related preferences to include in backup
+    final String? quizUseAll = await _dbHelper.getPreference(
+      'quiz_use_all_words',
+    );
+    final String? quizSelectedIds = await _dbHelper.getPreference(
+      'quiz_selected_word_ids',
+    );
+    final String? quizSelectedGroupId = await _dbHelper.getPreference(
+      'quiz_selected_word_group_id',
+    );
+
+    final Map<String, dynamic> sortWordSettings = {};
+    if (quizUseAll != null) {
+      sortWordSettings['quiz_use_all_words'] = quizUseAll;
+    }
+    if (quizSelectedIds != null) {
+      sortWordSettings['quiz_selected_word_ids'] = quizSelectedIds;
+    }
+    if (quizSelectedGroupId != null) {
+      sortWordSettings['quiz_selected_word_group_id'] = quizSelectedGroupId;
+    }
+
+    // Add Database JSON (including sort word settings) to ZIP
+    final Map<String, dynamic> backupPayload = {
+      "version": 1,
+      "vocabulary": vocabData,
+      "idioms": idiomData,
+    };
+
+    // Include word groups (by group name and word text) in ZIP backup
+    final List<Map<String, dynamic>> wordGroupsPayload =
+        await _buildWordGroupsPayload(vocabData);
+    if (wordGroupsPayload.isNotEmpty) {
+      backupPayload['word_groups'] = wordGroupsPayload;
+    }
+
+    if (sortWordSettings.isNotEmpty) {
+      backupPayload['sort_word_settings'] = sortWordSettings;
+    }
+
+    // Include quiz history from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final String? quizHistory = prefs.getString('quiz_history');
+    final int? quizHistoryNext = prefs.getInt('quiz_history_next_number');
+    if (quizHistory != null) {
+      backupPayload['quiz_history'] = quizHistory;
+    }
+    if (quizHistoryNext != null) {
+      backupPayload['quiz_history_next_number'] = quizHistoryNext;
+    }
+
+    // --- Include notes in backup ---
+    List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
+    backupPayload['notes'] = notes;
+
+    String jsonString = jsonEncode(backupPayload);
+    List<int> jsonBytes = utf8.encode(jsonString);
+
+    _updateLoadingProgress(0.10, progressLabel);
+
+    // Create a temporary ZIP on disk using a streaming encoder so
+    // the UI can update between files.
+    final tempDir = await getTemporaryDirectory();
+    final String tempZipPath = p.join(tempDir.path, _fullBackupZipFileName);
+
+    // Remove any previous temporary ZIP.
+    final tempZipFile = File(tempZipPath);
+    if (await tempZipFile.exists()) {
+      await tempZipFile.delete();
+    }
+
+    final encoder = ZipFileEncoder();
+    encoder.create(tempZipPath);
+
+    // Add the JSON backup as the first entry.
+    _updateLoadingProgress(0.15, progressLabel);
+    final jsonArchiveFile = ArchiveFile(
+      'data/backup.json',
+      jsonBytes.length,
+      jsonBytes,
+    );
+    encoder.addArchiveFile(jsonArchiveFile);
+
+    // Add Photos from app folder to ZIP, with progress updates.
+    _updateLoadingProgress(0.20, progressLabel);
+    String imagesPath = await _getLocalImagesPath();
+    Directory imgDir = Directory(imagesPath);
+    if (await imgDir.exists()) {
+      List<File> files = imgDir.listSync().whereType<File>().toList(
+        growable: false,
+      );
+
+      final int totalFiles = files.length;
+      int processed = 0;
+
+      for (final File file in files) {
+        processed++;
+        encoder.addFile(file);
+
+        if (totalFiles > 0) {
+          final double photoFraction = processed / totalFiles;
+          // Photos occupy the middle 70% of the progress bar.
+          final double overallFraction = 0.20 + (photoFraction * 0.70);
+          _updateLoadingProgress(overallFraction, progressLabel);
+        }
+
+        // Yield briefly so the UI can repaint the spinner.
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+    }
+
+    _updateLoadingProgress(0.93, progressLabel);
+    encoder.close();
+    return tempZipFile;
+  }
+
   Future<void> _exportToZip() async {
     try {
       await _showLoadingDialog("Exporting ZIP backup (data + photos)...");
-      List<Map<String, dynamic>> vocabData = await _dbHelper.queryAll(
-        DBHelper.tableVocab,
+      final File? tempZipFile = await _buildFullBackupZipToTemp(
+        progressLabel: 'Exporting ZIP backup',
       );
-      List<Map<String, dynamic>> idiomData = await _dbHelper.queryAll(
-        DBHelper.tableIdioms,
-      );
-      _updateLoadingProgress(0.05, 'Exporting ZIP backup');
-
-      if (vocabData.isEmpty && idiomData.isEmpty) {
-        _showSnackBar("No data found to export");
-        return;
-      }
-
-      // Read sort-words related preferences to include in backup
-      final String? quizUseAll = await _dbHelper.getPreference(
-        'quiz_use_all_words',
-      );
-      final String? quizSelectedIds = await _dbHelper.getPreference(
-        'quiz_selected_word_ids',
-      );
-      final String? quizSelectedGroupId = await _dbHelper.getPreference(
-        'quiz_selected_word_group_id',
-      );
-
-      final Map<String, dynamic> sortWordSettings = {};
-      if (quizUseAll != null) {
-        sortWordSettings['quiz_use_all_words'] = quizUseAll;
-      }
-      if (quizSelectedIds != null) {
-        sortWordSettings['quiz_selected_word_ids'] = quizSelectedIds;
-      }
-      if (quizSelectedGroupId != null) {
-        sortWordSettings['quiz_selected_word_group_id'] = quizSelectedGroupId;
-      }
-
-      // Add Database JSON (including sort word settings) to ZIP
-      final Map<String, dynamic> backupPayload = {
-        "version": 1,
-        "vocabulary": vocabData,
-        "idioms": idiomData,
-      };
-
-      // Include word groups (by group name and word text) in ZIP backup
-      final List<Map<String, dynamic>> wordGroupsPayload =
-          await _buildWordGroupsPayload(vocabData);
-      if (wordGroupsPayload.isNotEmpty) {
-        backupPayload['word_groups'] = wordGroupsPayload;
-      }
-
-      if (sortWordSettings.isNotEmpty) {
-        backupPayload['sort_word_settings'] = sortWordSettings;
-      }
-
-      // Include quiz history from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final String? quizHistory = prefs.getString('quiz_history');
-      final int? quizHistoryNext = prefs.getInt('quiz_history_next_number');
-      if (quizHistory != null) {
-        backupPayload['quiz_history'] = quizHistory;
-      }
-      if (quizHistoryNext != null) {
-        backupPayload['quiz_history_next_number'] = quizHistoryNext;
-      }
-
-      // --- Include notes in backup ---
-      List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
-      backupPayload['notes'] = notes;
-
-      String jsonString = jsonEncode(backupPayload);
-      List<int> jsonBytes = utf8.encode(jsonString);
-
-      _updateLoadingProgress(0.10, 'Exporting ZIP backup');
-
-      // Create a temporary ZIP on disk using a streaming encoder so
-      // the UI can update between files.
-      final tempDir = await getTemporaryDirectory();
-      final String tempZipPath = p.join(tempDir.path, 'app_full_backup.zip');
-
-      // Remove any previous temporary ZIP.
-      final tempZipFile = File(tempZipPath);
-      if (await tempZipFile.exists()) {
-        await tempZipFile.delete();
-      }
-
-      final encoder = ZipFileEncoder();
-      encoder.create(tempZipPath);
-
-      // Add the JSON backup as the first entry.
-      _updateLoadingProgress(0.15, 'Exporting ZIP backup');
-      final jsonArchiveFile = ArchiveFile(
-        'data/backup.json',
-        jsonBytes.length,
-        jsonBytes,
-      );
-      encoder.addArchiveFile(jsonArchiveFile);
-
-      // Add Photos from app folder to ZIP, with progress updates.
-      _updateLoadingProgress(0.20, 'Exporting ZIP backup');
-      String imagesPath = await _getLocalImagesPath();
-      Directory imgDir = Directory(imagesPath);
-      if (await imgDir.exists()) {
-        List<File> files = imgDir.listSync().whereType<File>().toList(
-          growable: false,
-        );
-
-        final int totalFiles = files.length;
-        int processed = 0;
-
-        for (final File file in files) {
-          processed++;
-          encoder.addFile(file);
-
-          if (totalFiles > 0) {
-            final double photoFraction = processed / totalFiles;
-            // Photos occupy the middle 70% of the progress bar.
-            final double overallFraction = 0.20 + (photoFraction * 0.70);
-            _updateLoadingProgress(overallFraction, 'Exporting ZIP backup');
-          }
-
-          // Yield briefly so the UI can repaint the spinner.
-          await Future.delayed(const Duration(milliseconds: 10));
-        }
-      }
-
-      _updateLoadingProgress(0.93, 'Exporting ZIP backup');
-      encoder.close();
+      if (tempZipFile == null) return;
 
       _updateLoadingProgress(0.96, 'Exporting ZIP backup');
       final List<int> zipBytes = await tempZipFile.readAsBytes();
@@ -474,7 +491,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       _updateLoadingProgress(0.99, 'Exporting ZIP backup');
       await FilePicker.platform.saveFile(
         dialogTitle: 'Save Full Backup Zip:',
-        fileName: 'app_full_backup.zip',
+        fileName: _fullBackupZipFileName,
         bytes: Uint8List.fromList(zipBytes),
       );
 
@@ -491,6 +508,168 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // ---------------------------------------------------------
   // 4. NEW ZIP IMPORT (JSON + Photos)
   // ---------------------------------------------------------
+  Future<void> _importFromZipFile(File zipFile) async {
+    try {
+      await _showLoadingDialog("Reading ZIP backup (data + photos)...");
+
+      Uint8List bytes = await zipFile.readAsBytes();
+      Archive archive = ZipDecoder().decodeBytes(bytes);
+
+      // Find and decode the JSON data
+      ArchiveFile? jsonFile = archive.findFile('data/backup.json');
+      if (jsonFile == null) {
+        _hideLoadingDialog();
+        _showSnackBar("Invalid Zip: backup.json missing");
+        return;
+      }
+      String content = utf8.decode(jsonFile.content as List<int>);
+      dynamic jsonData = jsonDecode(content);
+
+      // Extract Images to app storage
+      String localImgPath = await _getLocalImagesPath();
+      int photoCount = 0;
+      for (var file in archive) {
+        if (file.isFile && file.name.startsWith('images/')) {
+          String filename = p.basename(file.name);
+          if (filename.isNotEmpty) {
+            File localFile = File(p.join(localImgPath, filename));
+            await localFile.writeAsBytes(file.content as List<int>);
+            photoCount++;
+          }
+        }
+      }
+
+      // Done with heavy file work; hide the reading dialog before confirm.
+      _hideLoadingDialog();
+
+      // Use the common import handler
+      List<dynamic> vocabToProcess = jsonData['vocabulary'] ?? [];
+      List<dynamic> idiomsToProcess = jsonData['idioms'] ?? [];
+      List<dynamic> wordGroupsToProcess = [];
+      if (jsonData is Map && jsonData['word_groups'] is List) {
+        wordGroupsToProcess = jsonData['word_groups'] as List<dynamic>;
+      }
+
+      // Optional: restore sort word settings if present in backup
+      Map<String, dynamic>? sortWordSettings;
+      if (jsonData is Map && jsonData['sort_word_settings'] is Map) {
+        sortWordSettings = Map<String, dynamic>.from(
+          jsonData['sort_word_settings'],
+        );
+      }
+
+      // Optional: restore quiz history if present in backup
+      String? quizHistory;
+      int? quizHistoryNext;
+      if (jsonData is Map && jsonData['quiz_history'] != null) {
+        quizHistory = jsonData['quiz_history'].toString();
+      }
+      if (jsonData is Map && jsonData['quiz_history_next_number'] != null) {
+        final dynamic rawNext = jsonData['quiz_history_next_number'];
+        if (rawNext is int) {
+          quizHistoryNext = rawNext;
+        } else {
+          quizHistoryNext = int.tryParse(rawNext.toString());
+        }
+      }
+
+      // --- Notes import ---
+      List<dynamic> notesToProcess = [];
+      if (jsonData is Map && jsonData['notes'] is List) {
+        notesToProcess = jsonData['notes'] as List<dynamic>;
+      }
+
+      bool? confirm = await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Import ZIP Backup"),
+          content: Text(
+            "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n- ${notesToProcess.length} notes\n\nContinue?",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Import"),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm == true) {
+        await _showLoadingDialog("Importing ZIP backup (data + photos)...");
+        try {
+          if (sortWordSettings != null) {
+            if (sortWordSettings.containsKey('quiz_use_all_words')) {
+              await _dbHelper.setPreference(
+                'quiz_use_all_words',
+                sortWordSettings['quiz_use_all_words'].toString(),
+              );
+            }
+            if (sortWordSettings.containsKey('quiz_selected_word_ids')) {
+              await _dbHelper.setPreference(
+                'quiz_selected_word_ids',
+                sortWordSettings['quiz_selected_word_ids'].toString(),
+              );
+            }
+            if (sortWordSettings.containsKey('quiz_selected_word_group_id')) {
+              await _dbHelper.setPreference(
+                'quiz_selected_word_group_id',
+                sortWordSettings['quiz_selected_word_group_id'].toString(),
+              );
+            }
+          }
+
+          if (quizHistory != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('quiz_history', quizHistory);
+            if (quizHistoryNext != null) {
+              await prefs.setInt('quiz_history_next_number', quizHistoryNext);
+            }
+          }
+
+          int addedWords = await _processImport(
+            vocabToProcess,
+            DBHelper.tableVocab,
+            'word',
+          );
+          int addedIdioms = await _processImport(
+            idiomsToProcess,
+            DBHelper.tableIdioms,
+            'idiom',
+          );
+          int createdWordGroups = await _processWordGroupsImport(
+            wordGroupsToProcess,
+          );
+          int addedNotes = await _processNotesImport(notesToProcess);
+
+          _showSnackBar(
+            "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, and $photoCount photos.",
+          );
+
+          // --- Refresh notes page if open ---
+          if (mounted) {
+            // ignore: use_build_context_synchronously
+            Navigator.of(context).popUntil((route) => true); // pop dialog
+            // ignore: use_build_context_synchronously
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text("Notes updated!")));
+          }
+        } finally {
+          _hideLoadingDialog();
+        }
+      }
+    } catch (e) {
+      _showSnackBar("Import Error: $e");
+    } finally {
+      _hideLoadingDialog();
+    }
+  }
+
   Future<void> _importFromZip() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -499,168 +678,77 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       );
 
       if (result != null && result.files.single.path != null) {
-        await _showLoadingDialog("Reading ZIP backup (data + photos)...");
-
         File zipFile = File(result.files.single.path!);
-        Uint8List bytes = await zipFile.readAsBytes();
-        Archive archive = ZipDecoder().decodeBytes(bytes);
-
-        // Find and decode the JSON data
-        ArchiveFile? jsonFile = archive.findFile('data/backup.json');
-        if (jsonFile == null) {
-          _hideLoadingDialog();
-          _showSnackBar("Invalid Zip: backup.json missing");
-          return;
-        }
-        String content = utf8.decode(jsonFile.content as List<int>);
-        dynamic jsonData = jsonDecode(content);
-
-        // Extract Images to app storage
-        String localImgPath = await _getLocalImagesPath();
-        int photoCount = 0;
-        for (var file in archive) {
-          if (file.isFile && file.name.startsWith('images/')) {
-            String filename = p.basename(file.name);
-            if (filename.isNotEmpty) {
-              File localFile = File(p.join(localImgPath, filename));
-              await localFile.writeAsBytes(file.content as List<int>);
-              photoCount++;
-            }
-          }
-        }
-
-        // Done with heavy file work; hide the reading dialog before confirm.
-        _hideLoadingDialog();
-
-        // Use the common import handler
-        List<dynamic> vocabToProcess = jsonData['vocabulary'] ?? [];
-        List<dynamic> idiomsToProcess = jsonData['idioms'] ?? [];
-        List<dynamic> wordGroupsToProcess = [];
-        if (jsonData is Map && jsonData['word_groups'] is List) {
-          wordGroupsToProcess = jsonData['word_groups'] as List<dynamic>;
-        }
-
-        // Optional: restore sort word settings if present in backup
-        Map<String, dynamic>? sortWordSettings;
-        if (jsonData is Map && jsonData['sort_word_settings'] is Map) {
-          sortWordSettings = Map<String, dynamic>.from(
-            jsonData['sort_word_settings'],
-          );
-        }
-
-        // Optional: restore quiz history if present in backup
-        String? quizHistory;
-        int? quizHistoryNext;
-        if (jsonData is Map && jsonData['quiz_history'] != null) {
-          quizHistory = jsonData['quiz_history'].toString();
-        }
-        if (jsonData is Map && jsonData['quiz_history_next_number'] != null) {
-          final dynamic rawNext = jsonData['quiz_history_next_number'];
-          if (rawNext is int) {
-            quizHistoryNext = rawNext;
-          } else {
-            quizHistoryNext = int.tryParse(rawNext.toString());
-          }
-        }
-
-        // --- Notes import ---
-        List<dynamic> notesToProcess = [];
-        if (jsonData is Map && jsonData['notes'] is List) {
-          notesToProcess = jsonData['notes'] as List<dynamic>;
-        }
-
-        bool? confirm = await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Import ZIP Backup"),
-            content: Text(
-              "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n- ${notesToProcess.length} notes\n\nContinue?",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text("Import"),
-              ),
-            ],
-          ),
-        );
-
-        if (confirm == true) {
-          await _showLoadingDialog("Importing ZIP backup (data + photos)...");
-          try {
-            if (sortWordSettings != null) {
-              if (sortWordSettings.containsKey('quiz_use_all_words')) {
-                await _dbHelper.setPreference(
-                  'quiz_use_all_words',
-                  sortWordSettings['quiz_use_all_words'].toString(),
-                );
-              }
-              if (sortWordSettings.containsKey('quiz_selected_word_ids')) {
-                await _dbHelper.setPreference(
-                  'quiz_selected_word_ids',
-                  sortWordSettings['quiz_selected_word_ids'].toString(),
-                );
-              }
-              if (sortWordSettings.containsKey('quiz_selected_word_group_id')) {
-                await _dbHelper.setPreference(
-                  'quiz_selected_word_group_id',
-                  sortWordSettings['quiz_selected_word_group_id'].toString(),
-                );
-              }
-            }
-
-            if (quizHistory != null) {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('quiz_history', quizHistory);
-              if (quizHistoryNext != null) {
-                await prefs.setInt('quiz_history_next_number', quizHistoryNext);
-              }
-            }
-
-            int addedWords = await _processImport(
-              vocabToProcess,
-              DBHelper.tableVocab,
-              'word',
-            );
-            int addedIdioms = await _processImport(
-              idiomsToProcess,
-              DBHelper.tableIdioms,
-              'idiom',
-            );
-            int createdWordGroups = await _processWordGroupsImport(
-              wordGroupsToProcess,
-            );
-            int addedNotes = await _processNotesImport(notesToProcess);
-
-            _showSnackBar(
-              "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, and $photoCount photos.",
-            );
-
-            // --- Refresh notes page if open ---
-            if (mounted) {
-              // Try to find NotesPage in the navigation stack and refresh it
-              // (If not found, do nothing. If user is on NotesPage, will refresh.)
-              // This is a best effort; for more robust, use a state management solution.
-              // Here, we use a notification.
-              // ignore: use_build_context_synchronously
-              Navigator.of(context).popUntil((route) => true); // pop dialog
-              // ignore: use_build_context_synchronously
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text("Notes updated!")));
-            }
-          } finally {
-            _hideLoadingDialog();
-          }
-        }
+        await _importFromZipFile(zipFile);
       }
     } catch (e) {
       _showSnackBar("Import Error: $e");
     }
+  }
+
+  // ---------------------------------------------------------
+  // 5. GOOGLE DRIVE EXPORT/IMPORT (FULL ZIP)
+  // ---------------------------------------------------------
+  Future<void> _exportFullZipToGoogleDrive() async {
+    try {
+      await _showLoadingDialog("Signing in to Google Drive...");
+      final account = await _googleDriveService.ensureSignedIn(
+        interactive: true,
+      );
+      if (account == null) {
+        _showSnackBar("Google Drive sign-in cancelled");
+        return;
+      }
+
+      _updateLoadingProgress(0.05, 'Preparing backup');
+      final File? tempZipFile = await _buildFullBackupZipToTemp(
+        progressLabel: 'Preparing backup',
+      );
+      if (tempZipFile == null) return;
+
+      _updateLoadingProgress(0.97, 'Uploading to Google Drive');
+      await _googleDriveService.uploadFile(tempZipFile, _fullBackupZipFileName);
+      _updateLoadingProgress(1.0, 'Uploading to Google Drive');
+
+      _showSnackBar("Backup uploaded to Google Drive!");
+    } catch (e) {
+      _showSnackBar("Google Drive Export Error: $e");
+    } finally {
+      _hideLoadingDialog();
+    }
+  }
+
+  Future<void> _importFullZipFromGoogleDrive() async {
+    File? downloaded;
+    try {
+      await _showLoadingDialog("Signing in to Google Drive...");
+      final account = await _googleDriveService.ensureSignedIn(
+        interactive: true,
+      );
+      if (account == null) {
+        _showSnackBar("Google Drive sign-in cancelled");
+        return;
+      }
+
+      _updateLoadingProgress(0.05, 'Downloading from Google Drive');
+      _hideLoadingDialog();
+
+      await _showLoadingDialog("Downloading backup from Google Drive...");
+      final tempDir = await getTemporaryDirectory();
+      final String savePath = p.join(tempDir.path, _fullBackupZipFileName);
+      downloaded = await _googleDriveService.downloadFile(
+        _fullBackupZipFileName,
+        savePath,
+      );
+    } catch (e) {
+      _showSnackBar("Google Drive Import Error: $e");
+      return;
+    } finally {
+      _hideLoadingDialog();
+    }
+
+    if (downloaded == null) return;
+    await _importFromZipFile(downloaded);
   }
 
   // Helper function shared by both Import methods
@@ -836,6 +924,18 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
           ),
           const SizedBox(height: 10),
+          _buildSvgCard(
+            "Export Full to Google Drive",
+            "Upload full backup ZIP to Drive",
+            _googleDriveIconAsset,
+            _exportFullZipToGoogleDrive,
+          ),
+          _buildSvgCard(
+            "Import Full from Google Drive",
+            "Download and restore the backup ZIP",
+            _googleDriveIconAsset,
+            _importFullZipFromGoogleDrive,
+          ),
           _buildCard(
             "Export Full ZIP",
             "Save everything including images",
@@ -849,11 +949,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             Icons.unarchive,
             Colors.orange,
             _importFromZip,
-          ),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Divider(),
           ),
 
           const Text(
@@ -874,11 +969,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             Icons.file_download,
             Colors.green,
             _importData,
-          ),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Divider(),
           ),
 
           const Text(
@@ -919,6 +1009,27 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         leading: CircleAvatar(
           backgroundColor: col,
           child: Icon(icon, color: Colors.white),
+        ),
+        title: Text(title),
+        subtitle: Text(sub),
+        onTap: tap,
+      ),
+    );
+  }
+
+  Widget _buildSvgCard(
+    String title,
+    String sub,
+    String assetPath,
+    VoidCallback tap,
+  ) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: const Color(0xFFF5F5F5),
+          child: SvgPicture.asset(assetPath, width: 24, height: 24),
         ),
         title: Text(title),
         subtitle: Text(sub),

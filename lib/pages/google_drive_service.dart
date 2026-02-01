@@ -1,50 +1,86 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 
 class GoogleDriveService {
   // Scopes required for the app
-  static const _scopes = [drive.DriveApi.driveFileScope];
+  static const List<String> _scopes = [drive.DriveApi.driveFileScope];
 
-  static Future<void>? _initFuture;
+  // Initialize GoogleSignIn (v6 style)
+  final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: _scopes);
 
-  static Future<void> _ensureInitialized() {
-    return _initFuture ??= GoogleSignIn.instance.initialize();
+  /// 1. Ensures the user is signed in (Hidden Helper)
+  Future<GoogleSignInAccount?> _ensureSignedIn({
+    bool interactive = true,
+  }) async {
+    GoogleSignInAccount? account = _googleSignIn.currentUser;
+
+    if (account != null) return account;
+
+    // A. Try Silent Sign-In (v6 method)
+    try {
+      account = await _googleSignIn.signInSilently();
+    } catch (e) {
+      debugPrint("Silent sign-in failed: $e");
+    }
+
+    // B. Interactive Sign-In
+    if (account == null && interactive) {
+      try {
+        account = await _googleSignIn.signIn();
+      } catch (e) {
+        debugPrint("User likely cancelled sign-in: $e");
+        return null;
+      }
+    }
+
+    return account;
   }
 
-  // 1. Sign In and Get Authenticated Client
+  // 2. Public method to ensure sign-in (for UI checks)
+  Future<GoogleSignInAccount?> ensureSignedIn({bool interactive = true}) async {
+    return _ensureSignedIn(interactive: interactive);
+  }
+
+  // 3. Get Authenticated Drive API Client
   Future<drive.DriveApi?> getDriveApi() async {
-    await _ensureInitialized();
     try {
-      final GoogleSignInAccount account = await GoogleSignIn.instance
-          .authenticate(scopeHint: _scopes);
-
-      final headers = await account.authorizationClient.authorizationHeaders(
-        _scopes,
-        promptIfNecessary: true,
+      final GoogleSignInAccount? account = await _ensureSignedIn(
+        interactive: true,
       );
+      if (account == null) return null;
 
-      if (headers == null) return null;
+      // C. Get Headers (v6 style - this works!)
+      final Map<String, String> headers = await account.authHeaders;
 
+      if (headers.isEmpty) return null;
+
+      // Construct the authenticated client
       return drive.DriveApi(GoogleAuthClient(headers));
     } catch (e) {
-      print("Google Sign In Error: $e");
+      debugPrint("Drive API Error: $e");
+      // If we get a 401, it might mean we need to sign in again
+      if (e.toString().contains("401")) {
+        await _googleSignIn.signOut();
+      }
       rethrow;
     }
   }
 
-  // 2. Sign Out
+  // 4. Sign Out
   Future<void> signOut() async {
-    await _ensureInitialized();
-    await GoogleSignIn.instance.signOut();
+    await _googleSignIn.signOut();
+    debugPrint("User signed out.");
   }
 
-  // 3. Upload File
+  // 5. Upload File
   Future<void> uploadFile(File localFile, String fileName) async {
     final driveApi = await getDriveApi();
     if (driveApi == null) return;
 
+    // Check if file exists to update instead of duplicate
     final fileList = await driveApi.files.list(
       q: "name = '$fileName' and trashed = false",
       $fields: "files(id)",
@@ -53,18 +89,22 @@ class GoogleDriveService {
     final driveFile = drive.File();
     driveFile.name = fileName;
 
-    // Use a stream for efficient memory usage with large files
-    final media = drive.Media(localFile.openRead(), localFile.lengthSync());
+    final int length = await localFile.length();
+    final media = drive.Media(localFile.openRead(), length);
 
     if (fileList.files != null && fileList.files!.isNotEmpty) {
+      // Update existing
       final fileId = fileList.files!.first.id!;
       await driveApi.files.update(driveFile, fileId, uploadMedia: media);
+      debugPrint("File updated: $fileName");
     } else {
+      // Create new
       await driveApi.files.create(driveFile, uploadMedia: media);
+      debugPrint("File created: $fileName");
     }
   }
 
-  // 4. Download File
+  // 6. Download File
   Future<File?> downloadFile(String fileName, String savePath) async {
     final driveApi = await getDriveApi();
     if (driveApi == null) return null;
@@ -75,7 +115,8 @@ class GoogleDriveService {
     );
 
     if (fileList.files == null || fileList.files!.isEmpty) {
-      throw Exception("Backup file not found in Google Drive.");
+      debugPrint("Backup file not found in Google Drive.");
+      return null;
     }
 
     final fileId = fileList.files!.first.id!;
@@ -89,10 +130,12 @@ class GoogleDriveService {
 
     final localFile = File(savePath);
 
-    // Efficiently pipe stream to file
     final sink = localFile.openWrite();
     await file.stream.pipe(sink);
+    await sink.flush();
+    await sink.close();
 
+    debugPrint("File downloaded to $savePath");
     return localFile;
   }
 }
