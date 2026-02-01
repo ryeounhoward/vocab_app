@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
@@ -703,6 +704,10 @@ class _InlineResizableZoomableImageEmbedState
   double? _width;
   double? _height;
 
+  double? _aspectRatio;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
   double? _startWidth;
   double? _startHeight;
 
@@ -711,6 +716,38 @@ class _InlineResizableZoomableImageEmbedState
     super.initState();
     _width = widget.imageSize.width;
     _height = widget.imageSize.height;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ensureAspectRatioResolved();
+  }
+
+  void _ensureAspectRatioResolved() {
+    if (_aspectRatio != null) return;
+
+    final provider = widget.imageWidget.image;
+    final stream = provider.resolve(createLocalImageConfiguration(context));
+
+    if (_imageStream?.key == stream.key) return;
+
+    if (_imageStream != null && _imageStreamListener != null) {
+      _imageStream!.removeListener(_imageStreamListener!);
+    }
+
+    _imageStream = stream;
+    _imageStreamListener = ImageStreamListener((info, _) {
+      final w = info.image.width.toDouble();
+      final h = info.image.height.toDouble();
+      if (h <= 0) return;
+      final ar = w / h;
+      if (!ar.isFinite || ar <= 0) return;
+      if (!mounted) return;
+      setState(() => _aspectRatio = ar);
+    });
+
+    stream.addListener(_imageStreamListener!);
   }
 
   void _toggleHandles() {
@@ -744,6 +781,40 @@ class _InlineResizableZoomableImageEmbedState
         : MediaQuery.sizeOf(context).height;
     final h = _height ?? 180;
     return h.clamp(80.0, maxHeight).toDouble();
+  }
+
+  ({double width, double height}) _effectiveSize(BoxConstraints constraints) {
+    final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 320;
+    final maxHeight = MediaQuery.sizeOf(context).height;
+
+    // Prefer the intrinsic aspect ratio when available. If not, fall back to the
+    // stored size's ratio (if present).
+    final ar =
+        _aspectRatio ??
+        ((widget.imageSize.width != null && widget.imageSize.height != null)
+            ? (widget.imageSize.width! / widget.imageSize.height!)
+            : null);
+
+    final baseWidth = _fallbackInitialWidth(constraints);
+    final baseHeight = _fallbackInitialHeight(constraints);
+
+    var width = baseWidth;
+    var height = baseHeight;
+
+    if (ar != null && ar.isFinite && ar > 0) {
+      // Keep the box matching the image ratio to avoid "empty" sides.
+      width = width.clamp(80.0, maxWidth).toDouble();
+      height = (width / ar).clamp(80.0, maxHeight).toDouble();
+
+      // If height clamping forced a smaller/larger height, recompute width.
+      width = (height * ar).clamp(80.0, maxWidth).toDouble();
+      height = (width / ar).clamp(80.0, maxHeight).toDouble();
+    } else {
+      width = width.clamp(80.0, maxWidth).toDouble();
+      height = height.clamp(80.0, maxHeight).toDouble();
+    }
+
+    return (width: width, height: height);
   }
 
   void _applySizeToDocument({required double width, required double height}) {
@@ -786,106 +857,134 @@ class _InlineResizableZoomableImageEmbedState
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final effectiveWidth = _fallbackInitialWidth(constraints);
-        final effectiveHeight = _fallbackInitialHeight(constraints);
+        final size = _effectiveSize(constraints);
+        final effectiveWidth = size.width;
+        final effectiveHeight = size.height;
 
-        final image = SizedBox(
+        // IMPORTANT:
+        // `InteractiveViewer` will try to expand under loose constraints.
+        // Wrapping it with a tight `SizedBox` ensures the border/handles match
+        // the actual image box (no full-width "empty" area).
+        final zoomable = SizedBox(
           width: effectiveWidth,
           height: effectiveHeight,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            alignment: widget.alignment,
-            child: widget.imageWidget,
+          child: ClipRect(
+            child: InteractiveViewer(
+              panEnabled: true,
+              scaleEnabled: true,
+              minScale: 1.0,
+              maxScale: 5.0,
+              child: Align(
+                alignment: widget.alignment,
+                child: widget.imageWidget,
+              ),
+            ),
           ),
         );
 
-        final zoomable = ClipRect(
-          child: InteractiveViewer(
-            panEnabled: true,
-            scaleEnabled: true,
-            minScale: 1.0,
-            maxScale: 5.0,
-            child: image,
-          ),
-        );
+        final edgePadding = widget.margin != null
+            ? EdgeInsets.all(widget.margin!)
+            : null;
 
-        Widget content = zoomable;
-        if (widget.margin != null) {
-          content = Padding(
-            padding: EdgeInsets.all(widget.margin!),
-            child: content,
-          );
-        }
-
-        return GestureDetector(
-          onTap: _toggleHandles,
-          onLongPress: _openImageMenu,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              if (_showHandles)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.indigo, width: 2),
-                        borderRadius: BorderRadius.circular(6),
+        return Padding(
+          padding: edgePadding ?? EdgeInsets.zero,
+          child: GestureDetector(
+            onTap: _toggleHandles,
+            onLongPress: _openImageMenu,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                zoomable,
+                if (_showHandles)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.indigo, width: 2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              content,
-              if (_showHandles && !widget.readOnly) ...[
-                Positioned(
-                  right: -6,
-                  bottom: -6,
-                  child: _ResizeHandle(
-                    onPanStart: () {
-                      _startWidth = effectiveWidth;
-                      _startHeight = effectiveHeight;
-                    },
-                    onPanUpdate: (delta) {
-                      final startW = _startWidth ?? effectiveWidth;
-                      final startH = _startHeight ?? effectiveHeight;
+                if (_showHandles && !widget.readOnly) ...[
+                  Positioned(
+                    right: -6,
+                    bottom: -6,
+                    child: _ResizeHandle(
+                      onPanStart: () {
+                        _startWidth = effectiveWidth;
+                        _startHeight = effectiveHeight;
+                      },
+                      onPanUpdate: (delta) {
+                        final startW = _startWidth ?? effectiveWidth;
+                        final startH = _startHeight ?? effectiveHeight;
 
-                      final maxW = constraints.maxWidth.isFinite
-                          ? constraints.maxWidth
-                          : startW + 2000;
-                      final maxH = MediaQuery.sizeOf(context).height;
+                        final maxW = constraints.maxWidth.isFinite
+                            ? constraints.maxWidth
+                            : startW + 2000;
+                        final maxH = MediaQuery.sizeOf(context).height;
 
-                      final nextW = (startW + delta.dx).clamp(80.0, maxW);
-                      final nextH = (startH + delta.dy).clamp(80.0, maxH);
+                        final ar = _aspectRatio;
 
-                      setState(() {
-                        _width = nextW;
-                        _height = nextH;
-                      });
-                    },
-                    onPanEnd: () {
-                      final w = _width ?? effectiveWidth;
-                      final h = _height ?? effectiveHeight;
-                      _applySizeToDocument(width: w, height: h);
-                    },
-                  ),
-                ),
-                Positioned(
-                  top: -10,
-                  right: -10,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: IconButton(
-                      tooltip: 'Image menu',
-                      onPressed: _openImageMenu,
-                      icon: const Icon(Icons.more_vert, size: 20),
+                        double nextW;
+                        double nextH;
+                        if (ar != null && ar.isFinite && ar > 0) {
+                          nextW = (startW + delta.dx)
+                              .clamp(80.0, maxW)
+                              .toDouble();
+                          nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
+
+                          // If height was clamped, recompute width to keep ratio.
+                          nextW = (nextH * ar).clamp(80.0, maxW).toDouble();
+                          nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
+                        } else {
+                          nextW = (startW + delta.dx)
+                              .clamp(80.0, maxW)
+                              .toDouble();
+                          nextH = (startH + delta.dy)
+                              .clamp(80.0, maxH)
+                              .toDouble();
+                        }
+
+                        setState(() {
+                          _width = nextW;
+                          _height = nextH;
+                        });
+                      },
+                      onPanEnd: () {
+                        final w = _width ?? effectiveWidth;
+                        final h = _height ?? effectiveHeight;
+                        _applySizeToDocument(width: w, height: h);
+                      },
                     ),
                   ),
-                ),
+                  Positioned(
+                    top: -10,
+                    right: -10,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: IconButton(
+                        tooltip: 'Image menu',
+                        onPressed: _openImageMenu,
+                        icon: const Icon(Icons.more_vert, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },
     );
+  }
+
+  @override
+  void dispose() {
+    if (_imageStream != null && _imageStreamListener != null) {
+      _imageStream!.removeListener(_imageStreamListener!);
+    }
+    super.dispose();
   }
 }
 
@@ -902,27 +1001,45 @@ class _ResizeHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanStart: (_) => onPanStart(),
-      onPanUpdate: (details) => onPanUpdate(details.delta),
-      onPanEnd: (_) => onPanEnd(),
-      child: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: Colors.indigo, width: 2),
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 2,
-              offset: Offset(0, 1),
+    // Larger hit-target (one finger) + mouse cursor (desktop).
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeUpLeftDownRight,
+      child: Tooltip(
+        message: 'Drag to resize',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onPanStart: (_) => onPanStart(),
+          onPanUpdate: (details) => onPanUpdate(details.delta),
+          onPanEnd: (_) => onPanEnd(),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: Colors.indigo, width: 2),
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.open_in_full,
+                  size: 14,
+                  color: Colors.indigo,
+                ),
+              ),
             ),
-          ],
+          ),
         ),
-        child: const Icon(Icons.open_in_full, size: 14, color: Colors.indigo),
       ),
     );
   }
