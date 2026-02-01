@@ -1,3 +1,14 @@
+// 1. Add this block at the very top
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+    }
+}
+
+// 2. Keep the rest of your file as is
 allprojects {
     repositories {
         google()

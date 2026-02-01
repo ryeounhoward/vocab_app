@@ -1,93 +1,118 @@
-// import 'dart:io';
-// import 'package:google_sign_in/google_sign_in.dart';
-// import 'package:googleapis/drive/v3.dart' as drive;
-// import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
 
-// class GoogleDriveService {
-//   // Scopes required for the app
-//   static const _scopes = [drive.DriveApi.driveFileScope];
+class GoogleDriveService {
+  // Scopes required for the app
+  static const _scopes = [drive.DriveApi.driveFileScope];
 
-//   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: _scopes);
+  static Future<void>? _initFuture;
 
-//   // 1. Sign In and Get Authenticated Client
-//   Future<drive.DriveApi?> getDriveApi() async {
-//     try {
-//       final GoogleSignInAccount? account = await _googleSignIn.signIn();
-//       if (account == null) {
-//         // User canceled the sign-in
-//         return null;
-//       }
-//       final httpClient = await _googleSignIn.authenticatedClient();
-//       if (httpClient == null) return null;
+  static Future<void> _ensureInitialized() {
+    return _initFuture ??= GoogleSignIn.instance.initialize();
+  }
 
-//       return drive.DriveApi(httpClient);
-//     } catch (e) {
-//       print("Google Sign In Error: $e");
-//       rethrow;
-//     }
-//   }
+  // 1. Sign In and Get Authenticated Client
+  Future<drive.DriveApi?> getDriveApi() async {
+    await _ensureInitialized();
+    try {
+      final GoogleSignInAccount account = await GoogleSignIn.instance
+          .authenticate(scopeHint: _scopes);
 
-//   // 2. Sign Out
-//   Future<void> signOut() async {
-//     await _googleSignIn.signOut();
-//   }
+      final headers = await account.authorizationClient.authorizationHeaders(
+        _scopes,
+        promptIfNecessary: true,
+      );
 
-//   // 3. Upload File (Create or Update)
-//   Future<void> uploadFile(File localFile, String fileName) async {
-//     final driveApi = await getDriveApi();
-//     if (driveApi == null) return;
+      if (headers == null) return null;
 
-//     // Check if file already exists to update it instead of creating duplicates
-//     final fileList = await driveApi.files.list(
-//       q: "name = '$fileName' and trashed = false",
-//       $fields: "files(id)",
-//     );
+      return drive.DriveApi(GoogleAuthClient(headers));
+    } catch (e) {
+      print("Google Sign In Error: $e");
+      rethrow;
+    }
+  }
 
-//     final driveFile = drive.File();
-//     driveFile.name = fileName;
+  // 2. Sign Out
+  Future<void> signOut() async {
+    await _ensureInitialized();
+    await GoogleSignIn.instance.signOut();
+  }
 
-//     final media = drive.Media(localFile.openRead(), localFile.lengthSync());
+  // 3. Upload File
+  Future<void> uploadFile(File localFile, String fileName) async {
+    final driveApi = await getDriveApi();
+    if (driveApi == null) return;
 
-//     if (fileList.files != null && fileList.files!.isNotEmpty) {
-//       // Update existing file
-//       final fileId = fileList.files!.first.id!;
-//       await driveApi.files.update(driveFile, fileId, uploadMedia: media);
-//     } else {
-//       // Create new file
-//       await driveApi.files.create(driveFile, uploadMedia: media);
-//     }
-//   }
+    final fileList = await driveApi.files.list(
+      q: "name = '$fileName' and trashed = false",
+      $fields: "files(id)",
+    );
 
-//   // 4. Restore (Download) File
-//   Future<File?> downloadFile(String fileName, String savePath) async {
-//     final driveApi = await getDriveApi();
-//     if (driveApi == null) return null;
+    final driveFile = drive.File();
+    driveFile.name = fileName;
 
-//     // Search for the file
-//     final fileList = await driveApi.files.list(
-//       q: "name = '$fileName' and trashed = false",
-//       $fields: "files(id, size)",
-//     );
+    // Use a stream for efficient memory usage with large files
+    final media = drive.Media(localFile.openRead(), localFile.lengthSync());
 
-//     if (fileList.files == null || fileList.files!.isEmpty) {
-//       throw Exception("Backup file not found in Google Drive.");
-//     }
+    if (fileList.files != null && fileList.files!.isNotEmpty) {
+      final fileId = fileList.files!.first.id!;
+      await driveApi.files.update(driveFile, fileId, uploadMedia: media);
+    } else {
+      await driveApi.files.create(driveFile, uploadMedia: media);
+    }
+  }
 
-//     final fileId = fileList.files!.first.id!;
-//     final drive.Media file =
-//         await driveApi.files.get(
-//               fileId,
-//               downloadOptions: drive.DownloadOptions.fullMedia,
-//             )
-//             as drive.Media;
+  // 4. Download File
+  Future<File?> downloadFile(String fileName, String savePath) async {
+    final driveApi = await getDriveApi();
+    if (driveApi == null) return null;
 
-//     final List<int> dataStore = [];
-//     await for (final data in file.stream) {
-//       dataStore.addAll(data);
-//     }
+    final fileList = await driveApi.files.list(
+      q: "name = '$fileName' and trashed = false",
+      $fields: "files(id, size)",
+    );
 
-//     final localFile = File(savePath);
-//     await localFile.writeAsBytes(dataStore);
-//     return localFile;
-//   }
-// }
+    if (fileList.files == null || fileList.files!.isEmpty) {
+      throw Exception("Backup file not found in Google Drive.");
+    }
+
+    final fileId = fileList.files!.first.id!;
+
+    final drive.Media file =
+        await driveApi.files.get(
+              fileId,
+              downloadOptions: drive.DownloadOptions.fullMedia,
+            )
+            as drive.Media;
+
+    final localFile = File(savePath);
+
+    // Efficiently pipe stream to file
+    final sink = localFile.openWrite();
+    await file.stream.pipe(sink);
+
+    return localFile;
+  }
+}
+
+/// A simple client that injects the Auth Headers into every request
+class GoogleAuthClient extends http.BaseClient {
+  final Map<String, String> _headers;
+  final http.Client _client = http.Client();
+
+  GoogleAuthClient(this._headers);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    request.headers.addAll(_headers);
+    return _client.send(request);
+  }
+
+  @override
+  void close() {
+    _client.close();
+    super.close();
+  }
+}
