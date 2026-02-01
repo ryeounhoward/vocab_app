@@ -711,6 +711,8 @@ class _InlineResizableZoomableImageEmbedState
   Offset _moveDragTotal = Offset.zero;
   final ValueNotifier<Offset> _movePreviewOffset = ValueNotifier(Offset.zero);
 
+  int? _lastEmbedOffset;
+
   double? _aspectRatio;
   ImageStream? _imageStream;
   ImageStreamListener? _imageStreamListener;
@@ -722,11 +724,34 @@ class _InlineResizableZoomableImageEmbedState
   double? _startWidth;
   double? _startHeight;
 
+  int _safeLastIndexOf(String text, String pattern, int startIndex) {
+    if (text.isEmpty) return -1;
+    if (startIndex < 0) return -1;
+    final capped = startIndex >= text.length ? text.length - 1 : startIndex;
+    return text.lastIndexOf(pattern, capped);
+  }
+
+  int _resolveEmbedOffset(String docText) {
+    // After we move an embed, `widget.node` can become stale (it refers to the
+    // old node that was removed). The controller selection is updated in our
+    // replaceText calls, so we can derive the current embed offset from it.
+    final last = _lastEmbedOffset;
+    if (last != null && last >= 0 && last < docText.length) return last;
+
+    final sel = widget.controller.selection;
+    final candidate = sel.baseOffset - 1;
+    if (candidate >= 0 && candidate < docText.length) return candidate;
+    final fallback = widget.node.documentOffset;
+    if (fallback >= 0 && fallback < docText.length) return fallback;
+    return 0;
+  }
+
   @override
   void initState() {
     super.initState();
     _width = widget.imageSize.width;
     _height = widget.imageSize.height;
+    _lastEmbedOffset = widget.node.documentOffset;
   }
 
   @override
@@ -798,7 +823,8 @@ class _InlineResizableZoomableImageEmbedState
   }
 
   void _applyAlignmentToDocument(String alignment) {
-    final embedOffset = widget.node.documentOffset;
+    final docText = widget.controller.document.toPlainText();
+    final embedOffset = _resolveEmbedOffset(docText);
     final currentStyle =
         widget.node.style.attributes[quill.Attribute.style.key]?.value
             ?.toString() ??
@@ -820,12 +846,15 @@ class _InlineResizableZoomableImageEmbedState
 
   void _moveEmbedByOneLine({required bool down}) {
     final docText = widget.controller.document.toPlainText();
-    final embedOffset = widget.node.documentOffset;
+    final embedOffset = _resolveEmbedOffset(docText);
+
+    final maxIndex = widget.controller.document.length - 1;
+    if (embedOffset < 0 || embedOffset > maxIndex) return;
 
     if (embedOffset < 0 || embedOffset >= docText.length) return;
 
     // The EnsureEmbedLineRule usually keeps embeds on their own line.
-    final lineStart = docText.lastIndexOf('\n', embedOffset - 1) + 1;
+    final lineStart = _safeLastIndexOf(docText, '\n', embedOffset - 1) + 1;
     final lineEnd = docText.indexOf('\n', embedOffset);
     if (lineEnd < 0) return;
 
@@ -846,11 +875,12 @@ class _InlineResizableZoomableImageEmbedState
       targetOffset = nextLineEnd + 1;
     } else {
       if (lineStart <= 0) return;
-      final prevLineEnd = docText.lastIndexOf('\n', lineStart - 2);
+      final prevLineEnd = _safeLastIndexOf(docText, '\n', lineStart - 2);
       if (prevLineEnd < 0) {
         targetOffset = 0;
       } else {
-        final prevLineStart = docText.lastIndexOf('\n', prevLineEnd - 1) + 1;
+        final prevLineStart =
+            _safeLastIndexOf(docText, '\n', prevLineEnd - 1) + 1;
         targetOffset = prevLineStart;
       }
     }
@@ -871,28 +901,96 @@ class _InlineResizableZoomableImageEmbedState
       insertOffset -= removeLen;
     }
 
-    widget.controller.replaceText(
-      embedOffset,
-      removeLen,
-      '',
-      TextSelection.collapsed(offset: embedOffset),
-    );
-
-    widget.controller.replaceText(
-      insertOffset,
-      0,
-      quill.BlockEmbed.image(widget.imageSource),
-      TextSelection.collapsed(offset: insertOffset + 1),
-    );
-
     final prevSkip = widget.controller.skipRequestKeyboard;
     widget.controller.skipRequestKeyboard = true;
-    widget.controller.formatText(
-      insertOffset,
-      1,
-      quill.StyleAttribute(styleToKeep),
+
+    try {
+      widget.controller.replaceText(
+        embedOffset,
+        removeLen,
+        '',
+        TextSelection.collapsed(offset: embedOffset),
+      );
+
+      // IMPORTANT: after deletion, the document length changes.
+      // Re-clamp the insertion offset to the *new* valid range.
+      final newMaxInsert = (widget.controller.document.length - 1).clamp(
+        0,
+        1 << 30,
+      );
+      insertOffset = insertOffset.clamp(0, newMaxInsert).toInt();
+
+      widget.controller.replaceText(
+        insertOffset,
+        0,
+        quill.BlockEmbed.image(widget.imageSource),
+        TextSelection.collapsed(
+          offset: (insertOffset + 1).clamp(
+            0,
+            widget.controller.document.length,
+          ),
+        ),
+      );
+
+      widget.controller.formatText(
+        insertOffset,
+        1,
+        quill.StyleAttribute(styleToKeep),
+      );
+
+      _lastEmbedOffset = insertOffset;
+    } catch (_) {
+      // Best-effort rollback: if insertion failed, try to put the image back
+      // where it was so it never "disappears".
+      try {
+        final rollbackMax = (widget.controller.document.length - 1).clamp(
+          0,
+          1 << 30,
+        );
+        final rollbackOffset = embedOffset.clamp(0, rollbackMax).toInt();
+        widget.controller.replaceText(
+          rollbackOffset,
+          0,
+          quill.BlockEmbed.image(widget.imageSource),
+          TextSelection.collapsed(
+            offset: (rollbackOffset + 1).clamp(
+              0,
+              widget.controller.document.length,
+            ),
+          ),
+        );
+        widget.controller.formatText(
+          rollbackOffset,
+          1,
+          quill.StyleAttribute(styleToKeep),
+        );
+        _lastEmbedOffset = rollbackOffset;
+      } catch (_) {
+        // Swallow: worst case, do nothing rather than crash.
+      }
+    } finally {
+      widget.controller.skipRequestKeyboard = prevSkip;
+    }
+  }
+
+  bool _ensureExtraEmptyLineAtEnd() {
+    // Adds an extra newline right before the final document newline.
+    // This creates an empty paragraph at the bottom so images can be moved down
+    // even when they are currently on the last line.
+    final len = widget.controller.document.length;
+    if (len <= 1) return false;
+
+    final insertAt = len - 1;
+    final prevSkip = widget.controller.skipRequestKeyboard;
+    widget.controller.skipRequestKeyboard = true;
+    widget.controller.replaceText(
+      insertAt,
+      0,
+      '\n',
+      TextSelection.collapsed(offset: insertAt + 1),
     );
     widget.controller.skipRequestKeyboard = prevSkip;
+    return true;
   }
 
   double _fallbackInitialWidth(BoxConstraints constraints) {
@@ -944,7 +1042,8 @@ class _InlineResizableZoomableImageEmbedState
   }
 
   void _applySizeToDocument({required double width, required double height}) {
-    final embedOffset = widget.node.documentOffset;
+    final docText = widget.controller.document.toPlainText();
+    final embedOffset = _resolveEmbedOffset(docText);
 
     // IMPORTANT: flutter_quill has a format rule for image embeds that expects
     // sizing to be stored in the 'style' attribute string (handled by
@@ -984,6 +1083,7 @@ class _InlineResizableZoomableImageEmbedState
       _width = newWidth;
       _height = newHeight;
     }
+    _lastEmbedOffset = widget.node.documentOffset;
   }
 
   @override
@@ -1072,6 +1172,7 @@ class _InlineResizableZoomableImageEmbedState
                       bottom: -6,
                       child: _ResizeHandle(
                         onPanStart: () {
+                          FocusScope.of(context).unfocus();
                           _isResizing = true;
                           _startWidth = effectiveWidth;
                           _startHeight = effectiveHeight;
@@ -1147,6 +1248,7 @@ class _InlineResizableZoomableImageEmbedState
                       bottom: -6,
                       child: _MoveHandle(
                         onPanStart: () {
+                          FocusScope.of(context).unfocus();
                           _moveDragTotal = Offset.zero;
                           _movePreviewOffset.value = Offset.zero;
                         },
@@ -1155,8 +1257,8 @@ class _InlineResizableZoomableImageEmbedState
                           // Provide immediate visual feedback without touching
                           // the document while dragging.
                           _movePreviewOffset.value = Offset(
-                            _moveDragTotal.dx.clamp(-80.0, 80.0).toDouble(),
-                            _moveDragTotal.dy.clamp(-80.0, 80.0).toDouble(),
+                            _moveDragTotal.dx.clamp(-600.0, 600.0).toDouble(),
+                            _moveDragTotal.dy.clamp(-600.0, 600.0).toDouble(),
                           );
                         },
                         onPanEnd: () {
@@ -1172,9 +1274,32 @@ class _InlineResizableZoomableImageEmbedState
                             return;
                           }
 
-                          // Vertical drag: reorder by one line up/down.
-                          if (dy.abs() >= 30) {
-                            _moveEmbedByOneLine(down: dy > 0);
+                          // Vertical drag: reorder by multiple lines.
+                          if (dy.abs() >= 12) {
+                            final down = dy > 0;
+                            final steps = (dy.abs() / 40)
+                                .round()
+                                .clamp(1, 25)
+                                .toInt();
+
+                            for (var i = 0; i < steps; i++) {
+                              // If moving down near the end, create space first.
+                              if (down) {
+                                final before = widget.controller.document
+                                    .toPlainText();
+                                final embedOffset = _resolveEmbedOffset(before);
+                                final lineEnd = before.indexOf(
+                                  '\n',
+                                  embedOffset,
+                                );
+                                final nextLineStart = lineEnd + 1;
+                                if (lineEnd >= 0 &&
+                                    nextLineStart >= before.length) {
+                                  _ensureExtraEmptyLineAtEnd();
+                                }
+                              }
+                              _moveEmbedByOneLine(down: down);
+                            }
                           }
                         },
                       ),
