@@ -6,10 +6,12 @@ import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 import 'package:flutter_quill_extensions/src/common/utils/element_utils/element_utils.dart'
     show ElementSize, getElementAttributes;
+import 'package:flutter_quill_extensions/src/common/utils/string.dart'
+    show replaceStyleStringWithSize;
 import 'package:flutter_quill_extensions/src/editor/image/image_menu.dart'
     show ImageOptionsMenu;
 import 'package:flutter_quill_extensions/src/editor/image/widgets/image.dart'
-    show getImageWidgetByImageSource, standardizeImageUrl;
+    show getImageStyleString, getImageWidgetByImageSource, standardizeImageUrl;
 import 'package:image_picker/image_picker.dart';
 import '../database/db_helper.dart';
 
@@ -704,9 +706,18 @@ class _InlineResizableZoomableImageEmbedState
   double? _width;
   double? _height;
 
+  bool _isResizing = false;
+
+  Offset _moveDragTotal = Offset.zero;
+  final ValueNotifier<Offset> _movePreviewOffset = ValueNotifier(Offset.zero);
+
   double? _aspectRatio;
   ImageStream? _imageStream;
   ImageStreamListener? _imageStreamListener;
+
+  final TransformationController _transformationController =
+      TransformationController();
+  double _currentScale = 1.0;
 
   double? _startWidth;
   double? _startHeight;
@@ -769,6 +780,121 @@ class _InlineResizableZoomableImageEmbedState
     );
   }
 
+  String _setCssProperty(String style, String key, String value) {
+    final props = <String, String>{};
+    final parts = style.split(';');
+    for (final raw in parts) {
+      final part = raw.trim();
+      if (part.isEmpty) continue;
+      final idx = part.indexOf(':');
+      if (idx <= 0) continue;
+      final k = part.substring(0, idx).trim();
+      final v = part.substring(idx + 1).trim();
+      if (k.isEmpty) continue;
+      props[k] = v;
+    }
+    props[key] = value;
+    return props.entries.map((e) => '${e.key}: ${e.value}').join('; ');
+  }
+
+  void _applyAlignmentToDocument(String alignment) {
+    final embedOffset = widget.node.documentOffset;
+    final currentStyle =
+        widget.node.style.attributes[quill.Attribute.style.key]?.value
+            ?.toString() ??
+        '';
+    final baseStyle = currentStyle.isNotEmpty
+        ? currentStyle
+        : getImageStyleString(widget.controller);
+    final nextStyle = _setCssProperty(baseStyle, 'alignment', alignment);
+
+    final prevSkip = widget.controller.skipRequestKeyboard;
+    widget.controller.skipRequestKeyboard = true;
+    widget.controller.formatText(
+      embedOffset,
+      1,
+      quill.StyleAttribute(nextStyle),
+    );
+    widget.controller.skipRequestKeyboard = prevSkip;
+  }
+
+  void _moveEmbedByOneLine({required bool down}) {
+    final docText = widget.controller.document.toPlainText();
+    final embedOffset = widget.node.documentOffset;
+
+    if (embedOffset < 0 || embedOffset >= docText.length) return;
+
+    // The EnsureEmbedLineRule usually keeps embeds on their own line.
+    final lineStart = docText.lastIndexOf('\n', embedOffset - 1) + 1;
+    final lineEnd = docText.indexOf('\n', embedOffset);
+    if (lineEnd < 0) return;
+
+    // Remove the embed and its trailing newline if present.
+    final int removeLen =
+        (embedOffset + 1 < docText.length &&
+            docText.codeUnitAt(embedOffset + 1) == 10)
+        ? 2
+        : 1;
+
+    int targetOffset;
+
+    if (down) {
+      final nextLineStart = lineEnd + 1;
+      if (nextLineStart >= docText.length) return;
+      final nextLineEnd = docText.indexOf('\n', nextLineStart);
+      if (nextLineEnd < 0) return;
+      targetOffset = nextLineEnd + 1;
+    } else {
+      if (lineStart <= 0) return;
+      final prevLineEnd = docText.lastIndexOf('\n', lineStart - 2);
+      if (prevLineEnd < 0) {
+        targetOffset = 0;
+      } else {
+        final prevLineStart = docText.lastIndexOf('\n', prevLineEnd - 1) + 1;
+        targetOffset = prevLineStart;
+      }
+    }
+
+    if (targetOffset == embedOffset) return;
+
+    // Preserve current style (width/height/alignment) while moving.
+    final currentStyle =
+        widget.node.style.attributes[quill.Attribute.style.key]?.value
+            ?.toString() ??
+        '';
+    final styleToKeep = currentStyle.isNotEmpty
+        ? currentStyle
+        : getImageStyleString(widget.controller);
+
+    var insertOffset = targetOffset;
+    if (insertOffset > embedOffset) {
+      insertOffset -= removeLen;
+    }
+
+    widget.controller.replaceText(
+      embedOffset,
+      removeLen,
+      '',
+      TextSelection.collapsed(offset: embedOffset),
+    );
+
+    widget.controller.replaceText(
+      insertOffset,
+      0,
+      quill.BlockEmbed.image(widget.imageSource),
+      TextSelection.collapsed(offset: insertOffset + 1),
+    );
+
+    final prevSkip = widget.controller.skipRequestKeyboard;
+    widget.controller.skipRequestKeyboard = true;
+    widget.controller.formatText(
+      insertOffset,
+      1,
+      quill.StyleAttribute(styleToKeep),
+    );
+    widget.controller.skipRequestKeyboard = prevSkip;
+  }
+
   double _fallbackInitialWidth(BoxConstraints constraints) {
     final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 320;
     final w = _width ?? 240;
@@ -818,32 +944,39 @@ class _InlineResizableZoomableImageEmbedState
   }
 
   void _applySizeToDocument({required double width, required double height}) {
-    final selectionBefore = widget.controller.selection;
     final embedOffset = widget.node.documentOffset;
 
-    // Select the embed (length=1) so formatting applies to it.
-    widget.controller.updateSelection(
-      TextSelection(baseOffset: embedOffset, extentOffset: embedOffset + 1),
-      quill.ChangeSource.local,
+    // IMPORTANT: flutter_quill has a format rule for image embeds that expects
+    // sizing to be stored in the 'style' attribute string (handled by
+    // ResolveImageFormatRule). Using Attribute.width/height directly can throw:
+    // "Apply delta rules failed. No matching rule found for type: RuleType.format".
+
+    final currentStyle =
+        widget.node.style.attributes[quill.Attribute.style.key]?.value
+            ?.toString() ??
+        '';
+    final nextStyle = replaceStyleStringWithSize(
+      currentStyle.isNotEmpty
+          ? currentStyle
+          : getImageStyleString(widget.controller),
+      width: width,
+      height: height,
     );
 
-    widget.controller.formatSelection(
-      quill.Attribute.clone(quill.Attribute.width, width.toStringAsFixed(0)),
+    final prevSkip = widget.controller.skipRequestKeyboard;
+    widget.controller.skipRequestKeyboard = true;
+    widget.controller.formatText(
+      embedOffset,
+      1,
+      quill.StyleAttribute(nextStyle),
     );
-    widget.controller.formatSelection(
-      quill.Attribute.clone(quill.Attribute.height, height.toStringAsFixed(0)),
-    );
-
-    // Restore the user's selection.
-    widget.controller.updateSelection(
-      selectionBefore,
-      quill.ChangeSource.local,
-    );
+    widget.controller.skipRequestKeyboard = prevSkip;
   }
 
   @override
   void didUpdateWidget(covariant _InlineResizableZoomableImageEmbed oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_isResizing) return;
     // Keep in sync when size is changed by the menu or external edits.
     final newWidth = widget.imageSize.width;
     final newHeight = widget.imageSize.height;
@@ -870,13 +1003,35 @@ class _InlineResizableZoomableImageEmbedState
           height: effectiveHeight,
           child: ClipRect(
             child: InteractiveViewer(
-              panEnabled: true,
+              transformationController: _transformationController,
+              onInteractionUpdate: (_) {
+                final next = _transformationController.value
+                    .getMaxScaleOnAxis();
+                if (!next.isFinite) return;
+                // Only rebuild when crossing the "pannable" threshold.
+                final wasPannable = _currentScale > 1.01;
+                final isPannable = next > 1.01;
+                _currentScale = next;
+                if (wasPannable != isPannable && mounted) {
+                  setState(() {});
+                }
+              },
+              // Prevent the common "snaps back" feeling by allowing extra
+              // movement beyond the tight viewport bounds when zoomed.
+              boundaryMargin: const EdgeInsets.all(1000),
+              panEnabled: _currentScale > 1.01,
               scaleEnabled: true,
               minScale: 1.0,
               maxScale: 5.0,
-              child: Align(
-                alignment: widget.alignment,
-                child: widget.imageWidget,
+              child: RepaintBoundary(
+                child: SizedBox.expand(
+                  child: Image(
+                    image: widget.imageWidget.image,
+                    fit: BoxFit.contain,
+                    alignment: widget.alignment,
+                    errorBuilder: widget.imageWidget.errorBuilder,
+                  ),
+                ),
               ),
             ),
           ),
@@ -891,87 +1046,154 @@ class _InlineResizableZoomableImageEmbedState
           child: GestureDetector(
             onTap: _toggleHandles,
             onLongPress: _openImageMenu,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                zoomable,
-                if (_showHandles)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.indigo, width: 2),
-                          borderRadius: BorderRadius.circular(6),
+            child: ValueListenableBuilder<Offset>(
+              valueListenable: _movePreviewOffset,
+              builder: (context, previewOffset, child) {
+                return Transform.translate(offset: previewOffset, child: child);
+              },
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  zoomable,
+                  if (_showHandles)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.indigo, width: 2),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                if (_showHandles && !widget.readOnly) ...[
-                  Positioned(
-                    right: -6,
-                    bottom: -6,
-                    child: _ResizeHandle(
-                      onPanStart: () {
-                        _startWidth = effectiveWidth;
-                        _startHeight = effectiveHeight;
-                      },
-                      onPanUpdate: (delta) {
-                        final startW = _startWidth ?? effectiveWidth;
-                        final startH = _startHeight ?? effectiveHeight;
+                  if (_showHandles && !widget.readOnly) ...[
+                    Positioned(
+                      right: -6,
+                      bottom: -6,
+                      child: _ResizeHandle(
+                        onPanStart: () {
+                          _isResizing = true;
+                          _startWidth = effectiveWidth;
+                          _startHeight = effectiveHeight;
 
-                        final maxW = constraints.maxWidth.isFinite
-                            ? constraints.maxWidth
-                            : startW + 2000;
-                        final maxH = MediaQuery.sizeOf(context).height;
+                          // Ensure we have a stable "current" size to accumulate
+                          // deltas against during the drag.
+                          _width ??= effectiveWidth;
+                          _height ??= effectiveHeight;
+                        },
+                        onPanUpdate: (delta) {
+                          final startW = _startWidth ?? effectiveWidth;
+                          final startH = _startHeight ?? effectiveHeight;
 
-                        final ar = _aspectRatio;
+                          // IMPORTANT: `delta` is per-frame. For smooth resizing we
+                          // must accumulate against the latest size, not always
+                          // against the start size.
+                          final baseW = _width ?? startW;
+                          final baseH = _height ?? startH;
 
-                        double nextW;
-                        double nextH;
-                        if (ar != null && ar.isFinite && ar > 0) {
-                          nextW = (startW + delta.dx)
-                              .clamp(80.0, maxW)
-                              .toDouble();
-                          nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
+                          final maxW = constraints.maxWidth.isFinite
+                              ? constraints.maxWidth
+                              : startW + 2000;
+                          final maxH = MediaQuery.sizeOf(context).height;
 
-                          // If height was clamped, recompute width to keep ratio.
-                          nextW = (nextH * ar).clamp(80.0, maxW).toDouble();
-                          nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
-                        } else {
-                          nextW = (startW + delta.dx)
-                              .clamp(80.0, maxW)
-                              .toDouble();
-                          nextH = (startH + delta.dy)
-                              .clamp(80.0, maxH)
-                              .toDouble();
-                        }
+                          final ar = _aspectRatio;
 
-                        setState(() {
-                          _width = nextW;
-                          _height = nextH;
-                        });
-                      },
-                      onPanEnd: () {
-                        final w = _width ?? effectiveWidth;
-                        final h = _height ?? effectiveHeight;
-                        _applySizeToDocument(width: w, height: h);
-                      },
-                    ),
-                  ),
-                  Positioned(
-                    top: -10,
-                    right: -10,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: IconButton(
-                        tooltip: 'Image menu',
-                        onPressed: _openImageMenu,
-                        icon: const Icon(Icons.more_vert, size: 20),
+                          double nextW;
+                          double nextH;
+                          if (ar != null && ar.isFinite && ar > 0) {
+                            final wFromDx = baseW + delta.dx;
+                            final hFromDy = baseH + delta.dy;
+                            final wFromDy = hFromDy * ar;
+
+                            // If the user drags mostly vertically, still resize.
+                            final useDx =
+                                delta.dx.abs() >= (delta.dy.abs() * ar);
+                            final proposedW = (useDx ? wFromDx : wFromDy)
+                                .clamp(80.0, maxW)
+                                .toDouble();
+
+                            nextW = proposedW;
+                            nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
+
+                            // If height was clamped, recompute width to keep ratio.
+                            nextW = (nextH * ar).clamp(80.0, maxW).toDouble();
+                            nextH = (nextW / ar).clamp(80.0, maxH).toDouble();
+                          } else {
+                            nextW = (baseW + delta.dx)
+                                .clamp(80.0, maxW)
+                                .toDouble();
+                            nextH = (baseH + delta.dy)
+                                .clamp(80.0, maxH)
+                                .toDouble();
+                          }
+
+                          setState(() {
+                            _width = nextW;
+                            _height = nextH;
+                          });
+                        },
+                        onPanEnd: () {
+                          final w = _width ?? effectiveWidth;
+                          final h = _height ?? effectiveHeight;
+                          _applySizeToDocument(width: w, height: h);
+                          // Keep the visual size stable until the document
+                          // notifies listeners and rebuilds with the new attrs.
+                          _isResizing = false;
+                        },
                       ),
                     ),
-                  ),
+                    Positioned(
+                      left: -6,
+                      bottom: -6,
+                      child: _MoveHandle(
+                        onPanStart: () {
+                          _moveDragTotal = Offset.zero;
+                          _movePreviewOffset.value = Offset.zero;
+                        },
+                        onPanUpdate: (delta) {
+                          _moveDragTotal += delta;
+                          // Provide immediate visual feedback without touching
+                          // the document while dragging.
+                          _movePreviewOffset.value = Offset(
+                            _moveDragTotal.dx.clamp(-80.0, 80.0).toDouble(),
+                            _moveDragTotal.dy.clamp(-80.0, 80.0).toDouble(),
+                          );
+                        },
+                        onPanEnd: () {
+                          final dx = _moveDragTotal.dx;
+                          final dy = _moveDragTotal.dy;
+                          _movePreviewOffset.value = Offset.zero;
+
+                          // Horizontal drag: change alignment.
+                          if (dx.abs() >= 30 && dx.abs() >= dy.abs()) {
+                            _applyAlignmentToDocument(
+                              dx < 0 ? 'centerLeft' : 'centerRight',
+                            );
+                            return;
+                          }
+
+                          // Vertical drag: reorder by one line up/down.
+                          if (dy.abs() >= 30) {
+                            _moveEmbedByOneLine(down: dy > 0);
+                          }
+                        },
+                      ),
+                    ),
+                    Positioned(
+                      top: -10,
+                      right: -10,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: IconButton(
+                          tooltip: 'Image menu',
+                          onPressed: _openImageMenu,
+                          icon: const Icon(Icons.more_vert, size: 20),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -984,6 +1206,8 @@ class _InlineResizableZoomableImageEmbedState
     if (_imageStream != null && _imageStreamListener != null) {
       _imageStream!.removeListener(_imageStreamListener!);
     }
+    _transformationController.dispose();
+    _movePreviewOffset.dispose();
     super.dispose();
   }
 }
@@ -1033,6 +1257,62 @@ class _ResizeHandle extends StatelessWidget {
                 ),
                 child: const Icon(
                   Icons.open_in_full,
+                  size: 14,
+                  color: Colors.indigo,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MoveHandle extends StatelessWidget {
+  const _MoveHandle({
+    required this.onPanStart,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
+
+  final VoidCallback onPanStart;
+  final void Function(Offset delta) onPanUpdate;
+  final VoidCallback onPanEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.move,
+      child: Tooltip(
+        message: 'Drag to move (left/right align, up/down reorder)',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onPanStart: (_) => onPanStart(),
+          onPanUpdate: (details) => onPanUpdate(details.delta),
+          onPanEnd: (_) => onPanEnd(),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: Colors.indigo, width: 2),
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.open_with,
                   size: 14,
                   color: Colors.indigo,
                 ),
