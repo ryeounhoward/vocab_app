@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import 'google_drive_service.dart';
+import 'backup_preferences_page.dart';
 
 class BackupRestorePage extends StatefulWidget {
   const BackupRestorePage({super.key});
@@ -22,6 +23,8 @@ class BackupRestorePage extends StatefulWidget {
 
 class _BackupRestorePageState extends State<BackupRestorePage> {
   GoogleSignInAccount? _googleAccount;
+
+  int _lastProgressPercent = -1;
 
   @override
   void initState() {
@@ -128,7 +131,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     }
   }
 
-  Future<int> _processNotesImport(List<dynamic> notes) async {
+  Future<int> _processNotesImport(
+    List<dynamic> notes, {
+    void Function(int processed, int total)? onProgress,
+  }) async {
     if (notes.isEmpty) return 0;
     List<Map<String, dynamic>> existingNotes = await _dbHelper.queryAll(
       'notes',
@@ -137,7 +143,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         .map((e) => (e['id'] ?? '').toString())
         .toSet();
     int addedCount = 0;
+    int processed = 0;
+    final int total = notes.length;
     for (var item in notes) {
+      processed++;
       Map<String, dynamic> row = Map<String, dynamic>.from(item);
       // Use a unique key for notes, e.g., title+content or id if available
       String? noteKey;
@@ -153,7 +162,15 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         existingKeys.add(noteKey);
         addedCount++;
       }
+
+      if (onProgress != null && total > 0) {
+        if (processed == 1 || processed == total || processed % 25 == 0) {
+          onProgress(processed, total);
+        }
+      }
     }
+
+    onProgress?.call(total, total);
     return addedCount;
   }
 
@@ -214,7 +231,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     if (!mounted) return;
     final double clamped = fraction.clamp(0.01, 1.0);
     final int percent = (clamped * 100).round();
+    if (percent == _lastProgressPercent) return;
+    _lastProgressPercent = percent;
     _updateLoadingMessage('$baseLabel ($percent%)');
+  }
+
+  void _resetProgressThrottle() {
+    _lastProgressPercent = -1;
   }
 
   void _hideLoadingDialog() {
@@ -534,9 +557,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<void> _importFromZipFile(File zipFile) async {
     try {
       await _showLoadingDialog("Reading ZIP backup (data + photos)...");
+      _resetProgressThrottle();
+      _updateLoadingProgress(0.02, 'Reading ZIP backup');
 
       Uint8List bytes = await zipFile.readAsBytes();
       Archive archive = ZipDecoder().decodeBytes(bytes);
+      _updateLoadingProgress(0.10, 'Reading ZIP backup');
 
       // Find and decode the JSON data
       ArchiveFile? jsonFile = archive.findFile('data/backup.json');
@@ -551,16 +577,28 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       // Extract Images to app storage
       String localImgPath = await _getLocalImagesPath();
       int photoCount = 0;
-      for (var file in archive) {
-        if (file.isFile && file.name.startsWith('images/')) {
-          String filename = p.basename(file.name);
-          if (filename.isNotEmpty) {
-            File localFile = File(p.join(localImgPath, filename));
-            await localFile.writeAsBytes(file.content as List<int>);
-            photoCount++;
-          }
+      final List<ArchiveFile> imageFiles = archive
+          .where((f) => f.isFile && f.name.startsWith('images/'))
+          .cast<ArchiveFile>()
+          .toList();
+      final int totalImages = imageFiles.length;
+      for (int i = 0; i < imageFiles.length; i++) {
+        final file = imageFiles[i];
+        final String filename = p.basename(file.name);
+        if (filename.isEmpty) continue;
+
+        File localFile = File(p.join(localImgPath, filename));
+        await localFile.writeAsBytes(file.content as List<int>);
+        photoCount++;
+
+        if (totalImages > 0 &&
+            (i == 0 || i == totalImages - 1 || i % 10 == 0)) {
+          final double f = 0.10 + ((i + 1) / totalImages) * 0.20;
+          _updateLoadingProgress(f, 'Extracting photos');
         }
       }
+
+      _updateLoadingProgress(0.35, 'Reading ZIP backup');
 
       // Done with heavy file work; hide the reading dialog before confirm.
       _hideLoadingDialog();
@@ -624,7 +662,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
       if (confirm == true) {
         await _showLoadingDialog("Importing ZIP backup (data + photos)...");
+        _resetProgressThrottle();
         try {
+          _updateLoadingProgress(0.01, 'Importing settings');
+
           if (sortWordSettings != null) {
             if (sortWordSettings.containsKey('quiz_use_all_words')) {
               await _dbHelper.setPreference(
@@ -654,20 +695,42 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             }
           }
 
+          _updateLoadingProgress(0.08, 'Importing data');
+
           int addedWords = await _processImport(
             vocabToProcess,
             DBHelper.tableVocab,
             'word',
+            onProgress: (done, total) {
+              final double f = 0.08 + (done / total) * 0.52;
+              _updateLoadingProgress(f, 'Importing words ($done/$total)');
+            },
           );
           int addedIdioms = await _processImport(
             idiomsToProcess,
             DBHelper.tableIdioms,
             'idiom',
+            onProgress: (done, total) {
+              final double f = 0.60 + (done / total) * 0.18;
+              _updateLoadingProgress(f, 'Importing idioms ($done/$total)');
+            },
           );
           int createdWordGroups = await _processWordGroupsImport(
             wordGroupsToProcess,
+            onProgress: (done, total) {
+              final double f = 0.78 + (done / total) * 0.10;
+              _updateLoadingProgress(f, 'Importing word groups ($done/$total)');
+            },
           );
-          int addedNotes = await _processNotesImport(notesToProcess);
+          int addedNotes = await _processNotesImport(
+            notesToProcess,
+            onProgress: (done, total) {
+              final double f = 0.88 + (done / total) * 0.10;
+              _updateLoadingProgress(f, 'Importing notes ($done/$total)');
+            },
+          );
+
+          _updateLoadingProgress(0.99, 'Finalizing import');
 
           _showSnackBar(
             "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, and $photoCount photos.",
@@ -730,12 +793,23 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       );
       if (tempZipFile == null) return;
 
-      _updateLoadingProgress(0.97, 'Uploading to Google Drive');
+      _updateLoadingProgress(0.01, 'Uploading to Google Drive (starting...)');
       await _googleDriveService.uploadFile(
         tempZipFile,
         _fullBackupZipFileName,
-        onProgress: (fraction) {
-          _updateLoadingProgress(fraction, 'Uploading to Google Drive');
+        onProgress: (fraction, sent, total) {
+          final mbStr = total > 0
+              ? 'Uploading to Google Drive (${(sent / (1024 * 1024)).toStringAsFixed(2)} MB / ${(total / (1024 * 1024)).toStringAsFixed(2)} MB)'
+              : 'Uploading to Google Drive';
+          final shownFraction = (fraction.isNaN || fraction < 0.01)
+              ? 0.01
+              : fraction.clamp(0.01, 1.0);
+          _updateLoadingProgress(shownFraction, mbStr);
+          // Debug print to verify callback is called
+          // ignore: avoid_print
+          print(
+            '[DriveUploadProgress] $sent/$total bytes (${(fraction * 100).toStringAsFixed(1)}%)',
+          );
         },
       );
 
@@ -761,11 +835,24 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       await _showLoadingDialog("Downloading backup from Google Drive...");
       final tempDir = await getTemporaryDirectory();
       final String savePath = p.join(tempDir.path, _fullBackupZipFileName);
+      int lastTotal = 0;
       downloaded = await _googleDriveService.downloadFile(
         _fullBackupZipFileName,
         savePath,
-        onProgress: (fraction) {
-          _updateLoadingProgress(fraction, 'Downloading from Google Drive');
+        onProgress: (fraction, sent, total) {
+          lastTotal = total > 0 ? total : lastTotal;
+          final mbStr = lastTotal > 0
+              ? 'Downloading from Google Drive (${(sent / (1024 * 1024)).toStringAsFixed(2)} MB / ${(lastTotal / (1024 * 1024)).toStringAsFixed(2)} MB)'
+              : 'Downloading from Google Drive';
+          final shownFraction = (fraction.isNaN || fraction < 0.01)
+              ? 0.01
+              : fraction.clamp(0.01, 1.0);
+          _updateLoadingProgress(shownFraction, mbStr);
+          // Debug print to verify callback is called
+          // ignore: avoid_print
+          print(
+            '[DriveDownloadProgress] $sent/$lastTotal bytes (${(fraction * 100).toStringAsFixed(1)}%)',
+          );
         },
       );
     } catch (e) {
@@ -783,8 +870,9 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<int> _processImport(
     List<dynamic> list,
     String tableName,
-    String keyName,
-  ) async {
+    String keyName, {
+    void Function(int processed, int total)? onProgress,
+  }) async {
     if (list.isEmpty) return 0;
     List<Map<String, dynamic>> existingData = await _dbHelper.queryAll(
       tableName,
@@ -794,7 +882,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         .toSet();
 
     int addedCount = 0;
+    int processed = 0;
+    final int total = list.length;
     for (var item in list) {
+      processed++;
       Map<String, dynamic> row = Map<String, dynamic>.from(item);
       if (row.containsKey(keyName)) {
         String keyInJson = row[keyName].toString().toLowerCase().trim();
@@ -805,7 +896,15 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           addedCount++;
         }
       }
+
+      if (onProgress != null && total > 0) {
+        if (processed == 1 || processed == total || processed % 50 == 0) {
+          onProgress(processed, total);
+        }
+      }
     }
+
+    onProgress?.call(total, total);
     return addedCount;
   }
 
@@ -863,7 +962,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   }
 
   // Restore word groups from backup, matching words by their text.
-  Future<int> _processWordGroupsImport(List<dynamic> groups) async {
+  Future<int> _processWordGroupsImport(
+    List<dynamic> groups, {
+    void Function(int processed, int total)? onProgress,
+  }) async {
     if (groups.isEmpty) return 0;
 
     // Build lookup from normalized word text to its current DB id
@@ -900,42 +1002,55 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     }
 
     int createdGroups = 0;
+    final int total = groups.length;
+    int processed = 0;
 
     for (final dynamic raw in groups) {
-      if (raw is! Map) continue;
-      final dynamic nameValue = raw['name'];
-      final dynamic wordsValue = raw['words'];
+      processed++;
+      try {
+        if (raw is! Map) continue;
+        final dynamic nameValue = raw['name'];
+        final dynamic wordsValue = raw['words'];
 
-      if (nameValue == null || wordsValue is! List) continue;
+        if (nameValue == null || wordsValue is! List) continue;
 
-      final String groupName = nameValue.toString().trim();
-      if (groupName.isEmpty) continue;
+        final String groupName = nameValue.toString().trim();
+        if (groupName.isEmpty) continue;
 
-      final String groupKey = groupName.toLowerCase();
-      int groupId;
-      if (groupNameToId.containsKey(groupKey)) {
-        groupId = groupNameToId[groupKey]!;
-      } else {
-        groupId = await _dbHelper.insertWordGroup(groupName);
-        groupNameToId[groupKey] = groupId;
-        createdGroups++;
-      }
+        final String groupKey = groupName.toLowerCase();
+        int groupId;
+        if (groupNameToId.containsKey(groupKey)) {
+          groupId = groupNameToId[groupKey]!;
+        } else {
+          groupId = await _dbHelper.insertWordGroup(groupName);
+          groupNameToId[groupKey] = groupId;
+          createdGroups++;
+        }
 
-      final Set<int> wordIds = {};
-      for (final dynamic w in wordsValue) {
-        if (w == null) continue;
-        final String key = w.toString().toLowerCase().trim();
-        if (key.isEmpty) continue;
-        final int? wid = wordKeyToId[key];
-        if (wid != null) {
-          wordIds.add(wid);
+        final Set<int> wordIds = {};
+        for (final dynamic w in wordsValue) {
+          if (w == null) continue;
+          final String key = w.toString().toLowerCase().trim();
+          if (key.isEmpty) continue;
+          final int? wid = wordKeyToId[key];
+          if (wid != null) {
+            wordIds.add(wid);
+          }
+        }
+
+        if (wordIds.isNotEmpty) {
+          await _dbHelper.setGroupWords(groupId, wordIds);
+        }
+      } finally {
+        if (onProgress != null && total > 0) {
+          if (processed == 1 || processed == total || processed % 10 == 0) {
+            onProgress(processed, total);
+          }
         }
       }
-
-      if (wordIds.isNotEmpty) {
-        await _dbHelper.setGroupWords(groupId, wordIds);
-      }
     }
+
+    onProgress?.call(total, total);
 
     return createdGroups;
   }
@@ -958,6 +1073,19 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                 ),
               ),
               const SizedBox(height: 10),
+              _buildCard(
+                "Auto Backup Preferences",
+                "Set up automatic backups",
+                Icons.schedule,
+                Colors.indigo,
+                () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const BackupPreferencesPage(),
+                    ),
+                  );
+                },
+              ),
               // Google Drive account label
               _buildSvgCard(
                 "Export Full to Google Drive",

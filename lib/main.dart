@@ -12,6 +12,7 @@ import 'package:ota_update/ota_update.dart';
 
 // SERVICES
 import 'services/notification_service.dart';
+import 'services/auto_backup_service.dart';
 
 // PAGES
 import 'pages/menu_screen.dart';
@@ -23,6 +24,14 @@ import 'pages/notes_page.dart';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    if (task == AutoBackupService.workTaskName) {
+      await AutoBackupService.runInBackgroundNonInteractive();
+      return Future.value(true);
+    }
+
+    // Default: word reminder task
     int count = inputData?['wordCount'] ?? 1;
     await NotificationService.init();
     await NotificationService.showWordNotification(count: count);
@@ -207,6 +216,7 @@ void main() async {
 
   await NotificationService.init();
   Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+  await AutoBackupService.applySchedulingFromPrefs();
 
   runApp(const MyApp());
 }
