@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -25,6 +26,11 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   GoogleSignInAccount? _googleAccount;
 
   int _lastProgressPercent = -1;
+
+  StateSetter? _loadingDialogSetState;
+  Completer<void>? _loadingDialogReady;
+  bool _loadingDialogOpen = false;
+  double? _loadingFraction;
 
   @override
   void initState() {
@@ -100,9 +106,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           builder: (context) => AlertDialog(
             title: const Text("Import Notes"),
             content: Text(
-              "Items found:\n- Notes: " +
-                  notesToProcess.length.toString() +
-                  "\n\nExisting notes will be skipped. Continue?",
+              "Items found:\n- Notes: ${notesToProcess.length}\n\nExisting notes will be skipped. Continue?",
             ),
             actions: [
               TextButton(
@@ -184,47 +188,69 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   // --- Loading dialog helpers ---
   Future<void> _showLoadingDialog(String message) async {
     if (!mounted) return;
-    setState(() {
-      _loadingMessage = message;
-    });
+
+    _loadingDialogReady = Completer<void>();
+    _loadingDialogOpen = true;
+    _loadingMessage = message;
+    _loadingFraction = null;
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return WillPopScope(
-          onWillPop: () async => false,
-          child: AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            content: Row(
-              children: [
-                const SizedBox(
-                  height: 32,
-                  width: 32,
-                  child: CircularProgressIndicator(),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            _loadingDialogSetState = setState;
+            final ready = _loadingDialogReady;
+            if (ready != null && !ready.isCompleted) {
+              ready.complete();
+            }
+
+            return WillPopScope(
+              onWillPop: () async => false,
+              child: AlertDialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    _loadingMessage,
-                    style: const TextStyle(fontSize: 14),
+                content: SizedBox(
+                  width: 300,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _loadingMessage,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 14),
+                      LinearProgressIndicator(
+                        value: _loadingFraction,
+                        minHeight: 6,
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
+
+    // Ensure dialog is mounted before long work starts.
+    await _loadingDialogReady?.future;
   }
 
   void _updateLoadingMessage(String message) {
     if (!mounted) return;
     if (_loadingMessage == message) return;
-    setState(() {
-      _loadingMessage = message;
-    });
+    _loadingMessage = message;
+    final setter = _loadingDialogSetState;
+    if (_loadingDialogOpen && setter != null) {
+      setter(() {});
+    } else {
+      setState(() {});
+    }
   }
 
   void _updateLoadingProgress(double fraction, String baseLabel) {
@@ -233,6 +259,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     final int percent = (clamped * 100).round();
     if (percent == _lastProgressPercent) return;
     _lastProgressPercent = percent;
+    _loadingFraction = clamped;
     _updateLoadingMessage('$baseLabel ($percent%)');
   }
 
@@ -242,6 +269,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
   void _hideLoadingDialog() {
     if (!mounted) return;
+    _loadingDialogOpen = false;
+    _loadingDialogSetState = null;
+    _loadingDialogReady = null;
+    _loadingFraction = null;
     if (Navigator.of(context, rootNavigator: true).canPop()) {
       Navigator.of(context, rootNavigator: true).pop();
     }

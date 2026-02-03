@@ -7,6 +7,34 @@ import 'package:flutter/services.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:path_provider/path_provider.dart'; // Required for temporary files
 
+class DriveFileVersion {
+  final String id;
+  final String name;
+  final int sizeBytes;
+  final DateTime? modifiedTime;
+
+  const DriveFileVersion({
+    required this.id,
+    required this.name,
+    required this.sizeBytes,
+    required this.modifiedTime,
+  });
+}
+
+class DriveFileRevision {
+  final String id;
+  final int sizeBytes;
+  final DateTime? modifiedTime;
+  final bool keepForever;
+
+  const DriveFileRevision({
+    required this.id,
+    required this.sizeBytes,
+    required this.modifiedTime,
+    required this.keepForever,
+  });
+}
+
 class GoogleDriveService {
   // Drive scopes are only requested when we actually need Drive.
   static const List<String> _driveScopes = [drive.DriveApi.driveFileScope];
@@ -126,6 +154,116 @@ class GoogleDriveService {
   }
 
   // --- GENERIC FILE METHODS ---
+
+  Future<List<DriveFileVersion>> listFileVersions(
+    String fileName, {
+    bool interactive = false,
+    int pageSize = 50,
+  }) async {
+    return _withDriveApiRetry<List<DriveFileVersion>>((driveApi) async {
+      final fileList = await driveApi.files.list(
+        q: "name = '$fileName' and trashed = false",
+        orderBy: 'modifiedTime desc',
+        pageSize: pageSize,
+        $fields: 'files(id, name, size, modifiedTime)',
+      );
+
+      final files = fileList.files ?? const <drive.File>[];
+      return files
+          .where((f) => (f.id ?? '').isNotEmpty)
+          .map(
+            (f) => DriveFileVersion(
+              id: f.id!,
+              name: f.name ?? fileName,
+              sizeBytes: int.tryParse(f.size ?? '') ?? 0,
+              modifiedTime: f.modifiedTime,
+            ),
+          )
+          .toList();
+    }, interactive: interactive);
+  }
+
+  Future<List<DriveFileRevision>> listFileRevisionsByName(
+    String fileName, {
+    bool interactive = false,
+    int pageSize = 100,
+  }) async {
+    return _withDriveApiRetry<List<DriveFileRevision>>((driveApi) async {
+      final fileList = await driveApi.files.list(
+        q: "name = '$fileName' and trashed = false",
+        orderBy: 'modifiedTime desc',
+        pageSize: 1,
+        $fields: 'files(id)',
+      );
+
+      final files = fileList.files ?? const <drive.File>[];
+      if (files.isEmpty || (files.first.id ?? '').isEmpty) {
+        return const <DriveFileRevision>[];
+      }
+
+      final fileId = files.first.id!;
+
+      final List<DriveFileRevision> out = <DriveFileRevision>[];
+      String? pageToken;
+      do {
+        final revs = await driveApi.revisions.list(
+          fileId,
+          pageSize: pageSize,
+          pageToken: pageToken,
+          $fields:
+              'nextPageToken,revisions(id, modifiedTime, size, keepForever)',
+        );
+
+        final items = revs.revisions ?? const <drive.Revision>[];
+        out.addAll(
+          items
+              .where((r) => (r.id ?? '').isNotEmpty)
+              .map(
+                (r) => DriveFileRevision(
+                  id: r.id!,
+                  sizeBytes: int.tryParse(r.size ?? '') ?? 0,
+                  modifiedTime: r.modifiedTime,
+                  keepForever: r.keepForever ?? false,
+                ),
+              ),
+        );
+
+        pageToken = revs.nextPageToken;
+      } while (pageToken != null && pageToken!.isNotEmpty);
+
+      // Display latest first (newest -> oldest).
+      out.sort((a, b) {
+        final at = a.modifiedTime?.millisecondsSinceEpoch ?? 0;
+        final bt = b.modifiedTime?.millisecondsSinceEpoch ?? 0;
+        return bt.compareTo(at);
+      });
+      return out;
+    }, interactive: interactive);
+  }
+
+  Future<void> setRevisionKeepForever(
+    String fileName,
+    String revisionId, {
+    required bool keepForever,
+    bool interactive = true,
+  }) async {
+    await _withDriveApiRetry<void>((driveApi) async {
+      final fileList = await driveApi.files.list(
+        q: "name = '$fileName' and trashed = false",
+        orderBy: 'modifiedTime desc',
+        pageSize: 1,
+        $fields: 'files(id)',
+      );
+      final files = fileList.files ?? const <drive.File>[];
+      if (files.isEmpty || (files.first.id ?? '').isEmpty) {
+        throw StateError('Backup file not found in Drive');
+      }
+      final fileId = files.first.id!;
+
+      final patch = drive.Revision()..keepForever = keepForever;
+      await driveApi.revisions.update(patch, fileId, revisionId);
+    }, interactive: interactive);
+  }
 
   Future<void> uploadFile(
     File localFile,
