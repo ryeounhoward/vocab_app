@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:ota_update/ota_update.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 // SERVICES
 import 'services/notification_service.dart';
@@ -20,6 +22,8 @@ import 'pages/settings_page.dart';
 import 'pages/quiz_page.dart';
 import 'pages/vocabulary_test_page.dart';
 import 'pages/notes_page.dart';
+import 'pages/profile_page.dart';
+import 'pages/google_drive_Service.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -252,12 +256,79 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   int _currentIndex = 0;
 
+  final GoogleDriveService _googleDriveService = GoogleDriveService();
+  StreamSubscription<GoogleSignInAccount?>? _accountSub;
+  GoogleSignInAccount? _account;
+
+  bool get _isLoggedIn => _account != null;
+
+  Future<void> _restoreSignInSilently() async {
+    final account = await _googleDriveService.ensureSignedIn(
+      interactive: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      _account = account;
+    });
+  }
+
+  Widget _buildProfileNavIcon() {
+    if (!_isLoggedIn) return const Icon(Icons.settings);
+
+    final photoUrl = _account?.photoUrl;
+    if (photoUrl == null || photoUrl.trim().isEmpty) {
+      return const Icon(Icons.account_circle);
+    }
+
+    return CircleAvatar(
+      radius: 14,
+      backgroundColor: Colors.grey.shade200,
+      child: ClipOval(
+        child: Image.network(
+          photoUrl,
+          width: 28,
+          height: 28,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) =>
+              const Icon(Icons.account_circle, size: 28, color: Colors.grey),
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+
+    // Fast path: use any cached signed-in user immediately.
+    _account = _googleDriveService.currentUser;
+    _accountSub = _googleDriveService.onCurrentUserChanged.listen((account) {
+      if (!mounted) return;
+      setState(() {
+        _account = account;
+      });
+    });
+
+    // Also attempt a silent restore so the avatar appears on cold start.
+    unawaited(_restoreSignInSilently());
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       GitHubUpdateService.checkForUpdates(context);
     });
+  }
+
+  @override
+  void dispose() {
+    _accountSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -267,7 +338,7 @@ class _MainContainerState extends State<MainContainer> {
       const QuizPage(),
       VocabularyTestPage(parentTabIndex: _currentIndex, myTabIndex: 2),
       const NotesPage(),
-      const SettingsPage(),
+      _isLoggedIn ? const SettingsPage() : const SettingsPage(),
     ];
 
     // 2. WRAP WITH POPSCOPE TO PREVENT BLACK SCREEN
@@ -295,20 +366,26 @@ class _MainContainerState extends State<MainContainer> {
           type: BottomNavigationBarType.fixed,
           selectedItemColor: Colors.indigo,
           unselectedItemColor: Colors.grey,
-          items: const [
-            BottomNavigationBarItem(
+          items: [
+            const BottomNavigationBarItem(
               icon: Icon(Icons.rate_review),
               label: 'Review',
             ),
-            BottomNavigationBarItem(icon: Icon(Icons.style), label: 'Practice'),
-            BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Quiz'),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.style),
+              label: 'Practice',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.quiz),
+              label: 'Quiz',
+            ),
+            const BottomNavigationBarItem(
               icon: Icon(Icons.note_alt_outlined),
               label: 'Notes',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.settings),
-              label: 'Settings',
+              icon: _buildProfileNavIcon(),
+              label: _isLoggedIn ? 'Profile' : 'Settings',
             ),
           ],
         ),
