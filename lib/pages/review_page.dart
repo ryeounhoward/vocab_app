@@ -38,6 +38,8 @@ class _ReviewPageState extends State<ReviewPage> {
     'Future Perfect',
   ];
   static const Color _tenseAccentColor = Colors.indigo;
+  static final Color _relatedFormsAccentColor = Colors.teal.shade700;
+  bool _isRelatedFormsExpanded = false;
   bool _isTenseExpanded = false;
   // ------------------------------------------------------
 
@@ -55,6 +57,7 @@ class _ReviewPageState extends State<ReviewPage> {
     final bool showByDefault = prefs.getBool('show_tenses_by_default') ?? false;
     if (!mounted) return;
     setState(() {
+      _isRelatedFormsExpanded = showByDefault;
       _isTenseExpanded = showByDefault;
     });
   }
@@ -263,6 +266,37 @@ class _ReviewPageState extends State<ReviewPage> {
       return {};
     }
   }
+
+  List<Map<String, String>> _parseRelatedForms(Map<String, dynamic> item) {
+    final raw = (item['related_forms'] as String? ?? '').trim();
+    if (raw.isEmpty) return const [];
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+
+      return decoded
+          .whereType<Map>()
+          .map(
+            (entry) => {
+              'form': (entry['form'] ?? '').toString().trim(),
+              'type': (entry['type'] ?? '').toString().trim(),
+              'meaning': (entry['meaning'] ?? '').toString().trim(),
+              'example': (entry['example'] ?? '').toString().trim(),
+            },
+          )
+          .where(
+            (entry) =>
+                entry['form']!.isNotEmpty ||
+                entry['type']!.isNotEmpty ||
+                entry['meaning']!.isNotEmpty ||
+                entry['example']!.isNotEmpty,
+          )
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
   // -----------------------------------------------
 
   @override
@@ -314,6 +348,7 @@ class _ReviewPageState extends State<ReviewPage> {
     final pronunciation = (item['pronunciation'] as String? ?? '').trim();
     String synonyms = (item['synonyms'] as String? ?? '').trim();
     final tenseData = _parseTenseData(item);
+    final relatedForms = _parseRelatedForms(item);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
@@ -393,6 +428,8 @@ class _ReviewPageState extends State<ReviewPage> {
                                       style: const TextStyle(
                                         fontSize: 18,
                                         color: Colors.grey,
+                                        fontWeight: FontWeight.w700,
+                                        fontStyle: FontStyle.italic,
                                       ),
                                     ),
                                   ],
@@ -499,6 +536,109 @@ class _ReviewPageState extends State<ReviewPage> {
                       const SizedBox(height: 8),
                     ],
 
+                    if (relatedForms.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Related Forms",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _isRelatedFormsExpanded =
+                                    !_isRelatedFormsExpanded;
+                              });
+                            },
+                            icon: Icon(
+                              _isRelatedFormsExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              size: 20,
+                            ),
+                            label: Text(
+                              _isRelatedFormsExpanded
+                                  ? 'Hide related forms'
+                                  : 'Show related forms',
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_isRelatedFormsExpanded) ...[
+                        const SizedBox(height: 10),
+                        ...relatedForms.map(
+                          (entry) => Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                left: BorderSide(
+                                  color: _relatedFormsAccentColor,
+                                  width: 4,
+                                ),
+                              ),
+                              color: _relatedFormsAccentColor.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (entry['form']!.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _relatedFormsAccentColor,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text.rich(
+                                      TextSpan(
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 12,
+                                        ),
+                                        children: [
+                                          TextSpan(text: entry['form'] ?? ''),
+                                          if (entry['type']!.isNotEmpty)
+                                            TextSpan(
+                                              text: ' (${entry['type']})',
+                                              style: const TextStyle(
+                                                fontStyle: FontStyle.italic,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                if (entry['meaning']!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text('Definition: ${entry['meaning']}'),
+                                ],
+                                if (entry['example']!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Example: ${entry['example']}',
+                                    style: const TextStyle(
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                    ],
+
                     // --- Tense / Conjugation ---
                     if (tenseData.isNotEmpty) ...[
                       Row(
@@ -523,7 +663,9 @@ class _ReviewPageState extends State<ReviewPage> {
                                   : Icons.keyboard_arrow_down,
                               size: 20,
                             ),
-                            label: Text(_isTenseExpanded ? 'Hide' : 'Show'),
+                            label: Text(
+                              _isTenseExpanded ? 'Hide tenses' : 'Show tenses',
+                            ),
                           ),
                         ],
                       ),
@@ -537,17 +679,8 @@ class _ReviewPageState extends State<ReviewPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      '$tense:',
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
                                     if ((tenseData[tense]?['conjugation'] ?? '')
                                         .isNotEmpty) ...[
-                                      const SizedBox(height: 6),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 10,
@@ -559,13 +692,21 @@ class _ReviewPageState extends State<ReviewPage> {
                                             999,
                                           ),
                                         ),
-                                        child: Text(
-                                          tenseData[tense]?['conjugation'] ??
-                                              '',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12,
+                                        child: Text.rich(
+                                          TextSpan(
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 12,
+                                            ),
+                                            children: [
+                                              TextSpan(text: '$tense: '),
+                                              TextSpan(
+                                                text:
+                                                    tenseData[tense]?['conjugation'] ??
+                                                    '',
+                                              ),
+                                            ],
                                           ),
                                         ),
                                       ),
@@ -582,15 +723,14 @@ class _ReviewPageState extends State<ReviewPage> {
                                           8,
                                         ),
                                         decoration: BoxDecoration(
-                                          border: const Border(
+                                          border: Border(
                                             left: BorderSide(
                                               color: _tenseAccentColor,
                                               width: 4,
                                             ),
                                           ),
-                                          color: _tenseAccentColor.withOpacity(
-                                            0.06,
-                                          ),
+                                          color: _tenseAccentColor
+                                              .withOpacity(0.06),
                                           borderRadius: BorderRadius.circular(
                                             8,
                                           ),

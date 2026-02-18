@@ -12,6 +12,30 @@ import '../database/db_helper.dart';
 import '../services/ai_defaults.dart';
 import 'word_groups_page.dart';
 
+class _RelatedFormFields {
+  final TextEditingController formController;
+  final TextEditingController typeController;
+  final TextEditingController meaningController;
+  final TextEditingController exampleController;
+
+  _RelatedFormFields({
+    String form = '',
+    String type = '',
+    String meaning = '',
+    String example = '',
+  }) : formController = TextEditingController(text: form),
+       typeController = TextEditingController(text: type),
+       meaningController = TextEditingController(text: meaning),
+       exampleController = TextEditingController(text: example);
+
+  void dispose() {
+    formController.dispose();
+    typeController.dispose();
+    meaningController.dispose();
+    exampleController.dispose();
+  }
+}
+
 class AddEditPage extends StatefulWidget {
   final Map<String, dynamic>? vocabItem;
   const AddEditPage({super.key, this.vocabItem});
@@ -43,6 +67,7 @@ class _AddEditPageState extends State<AddEditPage> {
   final TextEditingController _urlController = TextEditingController();
 
   List<TextEditingController> _exampleControllers = [TextEditingController()];
+  List<_RelatedFormFields> _relatedFormControllers = [_RelatedFormFields()];
   final List<String> _tenseOrder = const [
     'Present Tense',
     'Past Tense',
@@ -58,6 +83,7 @@ class _AddEditPageState extends State<AddEditPage> {
   String? _wordType = 'Noun';
   String? _imagePath;
   bool _isDownloading = false;
+  bool _showRelatedForms = false;
   bool _showTenseConjugationForm = false;
 
   // Word group selection
@@ -111,6 +137,38 @@ class _AddEditPageState extends State<AddEditPage> {
             .toList();
       }
 
+      final String rawRelatedForms =
+          widget.vocabItem!['related_forms'] as String? ?? '';
+      if (rawRelatedForms.trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(rawRelatedForms);
+          if (decoded is List) {
+            final parsed = decoded
+                .whereType<Map>()
+                .map(
+                  (entry) => _RelatedFormFields(
+                    form: (entry['form'] ?? '').toString(),
+                    type: (entry['type'] ?? '').toString(),
+                    meaning: (entry['meaning'] ?? '').toString(),
+                    example: (entry['example'] ?? '').toString(),
+                  ),
+                )
+                .where(
+                  (entry) =>
+                      entry.formController.text.trim().isNotEmpty ||
+                      entry.typeController.text.trim().isNotEmpty ||
+                      entry.meaningController.text.trim().isNotEmpty ||
+                      entry.exampleController.text.trim().isNotEmpty,
+                )
+                .toList();
+            if (parsed.isNotEmpty) {
+              _disposeRelatedForms();
+              _relatedFormControllers = parsed;
+            }
+          }
+        } catch (_) {}
+      }
+
       final String rawTenseData =
           widget.vocabItem!['tense_data'] as String? ?? '';
       if (rawTenseData.trim().isNotEmpty) {
@@ -137,6 +195,7 @@ class _AddEditPageState extends State<AddEditPage> {
     final bool showByDefault = prefs.getBool('show_tenses_by_default') ?? false;
     if (!mounted) return;
     setState(() {
+      _showRelatedForms = showByDefault;
       _showTenseConjugationForm = showByDefault;
     });
   }
@@ -149,6 +208,7 @@ class _AddEditPageState extends State<AddEditPage> {
     _synonymsController.dispose();
     _urlController.dispose();
     _searchDisposeExamples();
+    _disposeRelatedForms();
     for (final controller in _tenseConjugationControllers.values) {
       controller.dispose();
     }
@@ -161,6 +221,12 @@ class _AddEditPageState extends State<AddEditPage> {
   void _searchDisposeExamples() {
     for (final controller in _exampleControllers) {
       controller.dispose();
+    }
+  }
+
+  void _disposeRelatedForms() {
+    for (final item in _relatedFormControllers) {
+      item.dispose();
     }
   }
 
@@ -390,6 +456,24 @@ class _AddEditPageState extends State<AddEditPage> {
     return "${raw[0].toUpperCase()}${raw.substring(1).toLowerCase()}";
   }
 
+  String? _trimAtSectionStart(String? value) {
+    if (value == null) return null;
+    final raw = value.trim();
+    if (raw.isEmpty) return null;
+
+    final sectionHeaderMatch = RegExp(
+      r'^\s*(?:Form(?:\s*\d+)?|Example\s*\d+|Present Tense|Past Tense|Present Participle|Past Participle|Present Perfect|Past Perfect|Future Perfect)\s*:',
+      multiLine: true,
+      caseSensitive: false,
+    ).firstMatch(raw);
+
+    if (sectionHeaderMatch == null) return raw;
+
+    final cleaned = raw.substring(0, sectionHeaderMatch.start).trimRight();
+    if (cleaned.isEmpty) return null;
+    return cleaned;
+  }
+
   String _canonicalTense(String input) {
     final value = input.trim().toLowerCase();
     switch (value) {
@@ -503,6 +587,101 @@ class _AddEditPageState extends State<AddEditPage> {
     };
   }
 
+  List<Map<String, String>> _parseRelatedFormsFromText(String source) {
+    final lines = source.split(RegExp(r'\r?\n'));
+    final formHeadingRegex = RegExp(
+      r'^Form(?:\s*\d+)?\s*:\s*(.*)$',
+      caseSensitive: false,
+    );
+
+    final List<Map<String, String>> result = [];
+    Map<String, String>? current;
+    bool appendingExample = false;
+
+    void pushCurrent() {
+      if (current == null) return;
+      final form = (current!['form'] ?? '').trim();
+      final type = (current!['type'] ?? '').trim();
+      final meaning = (current!['meaning'] ?? '').trim();
+      final example = (current!['example'] ?? '').trim();
+      if (form.isEmpty && type.isEmpty && meaning.isEmpty && example.isEmpty) {
+        current = null;
+        return;
+      }
+      result.add({
+        'form': form,
+        'type': type,
+        'meaning': meaning,
+        'example': example,
+      });
+      current = null;
+    }
+
+    for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (line.isEmpty) {
+        appendingExample = false;
+        continue;
+      }
+
+      final headingMatch = formHeadingRegex.firstMatch(line);
+      if (headingMatch != null) {
+        pushCurrent();
+        current = {
+          'form': (headingMatch.group(1) ?? '').trim(),
+          'type': '',
+          'meaning': '',
+          'example': '',
+        };
+        appendingExample = false;
+        continue;
+      }
+
+      if (current == null) continue;
+
+      final lower = line.toLowerCase();
+      if (_isKnownTense(line) || lower.startsWith('present tense:')) {
+        pushCurrent();
+        appendingExample = false;
+        continue;
+      }
+
+      if (lower.startsWith('type of speech:')) {
+        current!['type'] = line.substring('type of speech:'.length).trim();
+        appendingExample = false;
+        continue;
+      }
+
+      if (lower.startsWith('type:')) {
+        current!['type'] = line.substring('type:'.length).trim();
+        appendingExample = false;
+        continue;
+      }
+
+      if (lower.startsWith('meaning:')) {
+        current!['meaning'] = line.substring('meaning:'.length).trim();
+        appendingExample = false;
+        continue;
+      }
+
+      if (lower.startsWith('example:')) {
+        current!['example'] = line.substring('example:'.length).trim();
+        appendingExample = true;
+        continue;
+      }
+
+      if (appendingExample) {
+        final currentExample = (current!['example'] ?? '').trim();
+        current!['example'] = currentExample.isEmpty
+            ? line
+            : '$currentExample $line';
+      }
+    }
+
+    pushCurrent();
+    return result;
+  }
+
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
@@ -516,6 +695,7 @@ class _AddEditPageState extends State<AddEditPage> {
 
     try {
       bool pastedTenseWhileHidden = false;
+      bool pastedRelatedFormsWhileHidden = false;
 
       final word = _extractByLabels(text, 'Word', [
         'Pronunciation',
@@ -534,15 +714,16 @@ class _AddEditPageState extends State<AddEditPage> {
       final type =
           _extractByLabels(text, 'Type of Speech', ['Meaning', 'Synonyms']) ??
           _extractByLabels(text, 'Type', ['Meaning', 'Synonyms']);
-      final meaning = _extractByLabels(text, 'Meaning', [
-        'Synonyms',
-        'Example 1',
-        'Present Tense',
-      ]);
-      final synonyms = _extractByLabels(text, 'Synonyms', [
-        'Example 1',
-        'Present Tense',
-      ]);
+      final meaning = _trimAtSectionStart(
+        _extractByLabels(text, 'Meaning', [
+          'Synonyms',
+          'Example 1',
+          'Present Tense',
+        ]),
+      );
+      final synonyms = _trimAtSectionStart(
+        _extractByLabels(text, 'Synonyms', ['Example 1', 'Present Tense']),
+      );
 
       final numberedExamples =
           RegExp(
@@ -556,11 +737,13 @@ class _AddEditPageState extends State<AddEditPage> {
               .toList();
 
       final tenseData = _parseTenseDataFromText(text);
+      final relatedForms = _parseRelatedFormsFromText(text);
 
       if (word == null &&
           pronunciation == null &&
           type == null &&
           tenseData.isEmpty &&
+          relatedForms.isEmpty &&
           numberedExamples.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Clipboard format not recognized.')),
@@ -614,22 +797,52 @@ class _AddEditPageState extends State<AddEditPage> {
             }
           }
         }
+
+        if (relatedForms.isNotEmpty) {
+          pastedRelatedFormsWhileHidden = !_showRelatedForms;
+          _disposeRelatedForms();
+          _relatedFormControllers = relatedForms
+              .map(
+                (item) => _RelatedFormFields(
+                  form: item['form'] ?? '',
+                  type: item['type'] ?? '',
+                  meaning: item['meaning'] ?? '',
+                  example: item['example'] ?? '',
+                ),
+              )
+              .toList();
+        }
       });
+
+      final String pasteMessage;
+      if (tenseData.isNotEmpty || relatedForms.isNotEmpty) {
+        final List<String> detected = [];
+        if (tenseData.isNotEmpty) {
+          detected.add('${tenseData.length} tense form(s)');
+        }
+        if (relatedForms.isNotEmpty) {
+          detected.add('${relatedForms.length} related form(s)');
+        }
+        pasteMessage = 'Text pasted. Detected ${detected.join(' and ')}.';
+      } else {
+        pasteMessage = 'Text pasted into fields successfully.';
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            tenseData.isNotEmpty
-                ? 'Text pasted. Detected ${tenseData.length} tense form(s).'
-                : 'Text pasted into fields successfully.',
-          ),
-          action: pastedTenseWhileHidden
+          content: Text(pasteMessage),
+          action: (pastedTenseWhileHidden || pastedRelatedFormsWhileHidden)
               ? SnackBarAction(
                   label: 'SHOW',
                   onPressed: () {
                     if (!mounted) return;
                     setState(() {
-                      _showTenseConjugationForm = true;
+                      if (tenseData.isNotEmpty) {
+                        _showTenseConjugationForm = true;
+                      }
+                      if (relatedForms.isNotEmpty) {
+                        _showRelatedForms = true;
+                      }
                     });
                   },
                 )
@@ -700,6 +913,29 @@ class _AddEditPageState extends State<AddEditPage> {
     return jsonEncode(payload);
   }
 
+  String _buildRelatedFormsForSave() {
+    final List<Map<String, String>> payload = _relatedFormControllers
+        .map(
+          (item) => {
+            'form': item.formController.text.trim(),
+            'type': item.typeController.text.trim(),
+            'meaning': item.meaningController.text.trim(),
+            'example': item.exampleController.text.trim(),
+          },
+        )
+        .where(
+          (item) =>
+              item['form']!.isNotEmpty ||
+              item['type']!.isNotEmpty ||
+              item['meaning']!.isNotEmpty ||
+              item['example']!.isNotEmpty,
+        )
+        .toList();
+
+    if (payload.isEmpty) return '';
+    return jsonEncode(payload);
+  }
+
   void _save() async {
     if (_formKey.currentState!.validate()) {
       if (_urlController.text.isNotEmpty &&
@@ -712,6 +948,7 @@ class _AddEditPageState extends State<AddEditPage> {
           .where((t) => t.isNotEmpty)
           .join('\n');
       final tenseData = _buildTenseDataForSave();
+      final relatedForms = _buildRelatedFormsForSave();
       final data = {
         'word': _wordController.text,
         'pronunciation': _pronunciationController.text.trim(),
@@ -719,6 +956,7 @@ class _AddEditPageState extends State<AddEditPage> {
         'synonyms': _synonymsController.text.trim(),
         'examples': allExamples,
         'tense_data': tenseData,
+        'related_forms': relatedForms,
         'word_type': _wordType,
         'image_path': _imagePath,
       };
@@ -753,24 +991,32 @@ class _AddEditPageState extends State<AddEditPage> {
       ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: SizedBox(
-          height: 55,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.indigo,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 55,
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: _isDownloading || _isGenerating ? null : _save,
+                child: _isDownloading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text(
+                        "SAVE VOCABULARY",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
               ),
             ),
-            onPressed: _isDownloading || _isGenerating ? null : _save,
-            child: _isDownloading
-                ? const CircularProgressIndicator(color: Colors.white)
-                : const Text(
-                    "SAVE VOCABULARY",
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-          ),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
       body: SafeArea(
@@ -1074,6 +1320,110 @@ class _AddEditPageState extends State<AddEditPage> {
                   label: const Text("Add Another Example"),
                 ),
                 const SizedBox(height: 20),
+
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        "Related Forms",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _showRelatedForms = !_showRelatedForms;
+                        });
+                      },
+                      icon: Icon(
+                        _showRelatedForms
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                        size: 18,
+                      ),
+                      label: Text(_showRelatedForms ? 'Hide' : 'Show'),
+                    ),
+                  ],
+                ),
+                if (_showRelatedForms) ...[
+                  const SizedBox(height: 8),
+                  ..._relatedFormControllers.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final item = entry.value;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.black12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Form ${idx + 1}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.remove_circle,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () {
+                                  if (_relatedFormControllers.length > 1) {
+                                    setState(() {
+                                      final removed = _relatedFormControllers
+                                          .removeAt(idx);
+                                      removed.dispose();
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          TextFormField(
+                            controller: item.formController,
+                            decoration: _inputStyle('Word'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: item.typeController,
+                            decoration: _inputStyle('Type of Speech'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: item.meaningController,
+                            decoration: _inputStyle('Definition'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: item.exampleController,
+                            decoration: _inputStyle('Example'),
+                            maxLines: 2,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(
+                      () => _relatedFormControllers.add(_RelatedFormFields()),
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text("Add Related Form"),
+                  ),
+                ],
+                const SizedBox(height: 20),
+
                 Row(
                   children: [
                     const Expanded(

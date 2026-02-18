@@ -26,8 +26,8 @@ class DBHelper {
     String path = join(await getDatabasesPath(), "vocab.db");
     return await openDatabase(
       path,
-      // NEW: Incremented version to 12 to add pronunciation for vocabulary
-      version: 12,
+      // NEW: Incremented version to 13 to add related forms for vocabulary
+      version: 13,
       onCreate: (db, version) async {
         // Create Vocabulary Table
         await db.execute('''
@@ -38,6 +38,7 @@ class DBHelper {
           description TEXT,
           examples TEXT,
           tense_data TEXT,
+          related_forms TEXT,
           word_type TEXT,
           image_path TEXT,
           synonyms TEXT,
@@ -198,6 +199,13 @@ class DBHelper {
         if (oldVersion < 12) {
           await db.execute(
             "ALTER TABLE $tableVocab ADD COLUMN pronunciation TEXT",
+          );
+        }
+
+        // NEW: Upgrade logic for Version 13 (Vocabulary related forms)
+        if (oldVersion < 13) {
+          await db.execute(
+            "ALTER TABLE $tableVocab ADD COLUMN related_forms TEXT",
           );
         }
       },

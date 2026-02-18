@@ -209,8 +209,8 @@ class _ManageDataPageState extends State<ManageDataPage> {
                         ),
                         label: Text(
                           _showTenseByDefault
-                              ? 'Show Tenses: On'
-                              : 'Show Tenses: Off',
+                              ? 'Show Forms & Tenses: On'
+                              : 'Show Forms & Tenses: Off',
                           style: const TextStyle(fontSize: 14),
                         ),
                       ),

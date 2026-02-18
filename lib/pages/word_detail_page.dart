@@ -28,6 +28,8 @@ class _WordDetailPageState extends State<WordDetailPage> {
     'Future Perfect',
   ];
   static const Color _tenseAccentColor = Colors.indigo;
+  static final Color _relatedFormsAccentColor = Colors.teal.shade700;
+  bool _isRelatedFormsExpanded = false;
   bool _isTenseExpanded = false;
 
   // FIX 1: Add a variable to store the preferred voice
@@ -46,6 +48,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
     final bool showByDefault = prefs.getBool('show_tenses_by_default') ?? false;
     if (!mounted) return;
     setState(() {
+      _isRelatedFormsExpanded = showByDefault;
       _isTenseExpanded = showByDefault;
     });
   }
@@ -169,6 +172,37 @@ class _WordDetailPageState extends State<WordDetailPage> {
     }
   }
 
+  List<Map<String, String>> _parseRelatedForms() {
+    final raw = (currentItem['related_forms'] as String? ?? '').trim();
+    if (raw.isEmpty) return const [];
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+
+      return decoded
+          .whereType<Map>()
+          .map(
+            (entry) => {
+              'form': (entry['form'] ?? '').toString().trim(),
+              'type': (entry['type'] ?? '').toString().trim(),
+              'meaning': (entry['meaning'] ?? '').toString().trim(),
+              'example': (entry['example'] ?? '').toString().trim(),
+            },
+          )
+          .where(
+            (entry) =>
+                entry['form']!.isNotEmpty ||
+                entry['type']!.isNotEmpty ||
+                entry['meaning']!.isNotEmpty ||
+                entry['example']!.isNotEmpty,
+          )
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     bool isFav = currentItem['is_favorite'] == 1;
@@ -180,6 +214,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
         .trim();
     String synonyms = (currentItem['synonyms'] as String? ?? '').trim();
     final tenseData = _parseTenseData();
+    final relatedForms = _parseRelatedForms();
 
     return Scaffold(
       appBar: AppBar(
@@ -270,6 +305,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                             style: const TextStyle(
                                               fontSize: 18,
                                               color: Colors.blueGrey,
+                                              fontWeight: FontWeight.w700,
                                               fontStyle: FontStyle.italic,
                                             ),
                                           ),
@@ -383,6 +419,120 @@ class _WordDetailPageState extends State<WordDetailPage> {
                             const SizedBox(height: 8),
                           ],
 
+                          if (relatedForms.isNotEmpty) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "Related Forms",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo,
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _isRelatedFormsExpanded =
+                                          !_isRelatedFormsExpanded;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _isRelatedFormsExpanded
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.keyboard_arrow_down,
+                                    size: 20,
+                                  ),
+                                  label: Text(
+                                    _isRelatedFormsExpanded ? 'Hide' : 'Show',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_isRelatedFormsExpanded) ...[
+                              const SizedBox(height: 10),
+                              ...relatedForms.map(
+                                (item) => Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    10,
+                                    8,
+                                    10,
+                                    8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: _relatedFormsAccentColor,
+                                        width: 4,
+                                      ),
+                                    ),
+                                    color: _relatedFormsAccentColor.withOpacity(
+                                      0.08,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (item['form']!.isNotEmpty)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: _relatedFormsAccentColor,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text.rich(
+                                            TextSpan(
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12,
+                                              ),
+                                              children: [
+                                                TextSpan(
+                                                  text: item['form'] ?? '',
+                                                ),
+                                                if (item['type']!.isNotEmpty)
+                                                  TextSpan(
+                                                    text: ' (${item['type']})',
+                                                    style: const TextStyle(
+                                                      fontStyle:
+                                                          FontStyle.italic,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      if (item['meaning']!.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text('Definition: ${item['meaning']}'),
+                                      ],
+                                      if (item['example']!.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Example: ${item['example']}',
+                                          style: const TextStyle(
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                          ],
+
                           if (tenseData.isNotEmpty) ...[
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -425,18 +575,9 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            '$tense:',
-                                            style: const TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
                                           if ((tenseData[tense]?['conjugation'] ??
                                                   '')
                                               .isNotEmpty) ...[
-                                            const SizedBox(height: 6),
                                             Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
@@ -448,13 +589,21 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                                 borderRadius:
                                                     BorderRadius.circular(999),
                                               ),
-                                              child: Text(
-                                                tenseData[tense]?['conjugation'] ??
-                                                    '',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
+                                              child: Text.rich(
+                                                TextSpan(
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 12,
+                                                  ),
+                                                  children: [
+                                                    TextSpan(text: '$tense: '),
+                                                    TextSpan(
+                                                      text:
+                                                          tenseData[tense]?['conjugation'] ??
+                                                          '',
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ),
@@ -473,7 +622,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                                     8,
                                                   ),
                                               decoration: BoxDecoration(
-                                                border: const Border(
+                                                border: Border(
                                                   left: BorderSide(
                                                     color: _tenseAccentColor,
                                                     width: 4,
