@@ -444,7 +444,9 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                     size: 20,
                                   ),
                                   label: Text(
-                                    _isRelatedFormsExpanded ? 'Hide' : 'Show',
+                                    _isRelatedFormsExpanded
+                                        ? 'Hide related forms'
+                                        : 'Show related forms',
                                   ),
                                 ),
                               ],
@@ -557,7 +559,9 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                     size: 20,
                                   ),
                                   label: Text(
-                                    _isTenseExpanded ? 'Hide' : 'Show',
+                                    _isTenseExpanded
+                                        ? 'Hide tenses'
+                                        : 'Show tenses',
                                   ),
                                 ),
                               ],
@@ -571,80 +575,84 @@ class _WordDetailPageState extends State<WordDetailPage> {
                                       padding: const EdgeInsets.only(
                                         bottom: 12,
                                       ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if ((tenseData[tense]?['conjugation'] ??
-                                                  '')
-                                              .isNotEmpty) ...[
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: _tenseAccentColor,
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: Text.rich(
-                                                TextSpan(
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.w700,
-                                                    fontSize: 12,
-                                                  ),
-                                                  children: [
-                                                    TextSpan(text: '$tense: '),
-                                                    TextSpan(
-                                                      text:
-                                                          tenseData[tense]?['conjugation'] ??
-                                                          '',
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.fromLTRB(
+                                          10,
+                                          8,
+                                          10,
+                                          8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          border: Border(
+                                            left: BorderSide(
+                                              color: _tenseAccentColor,
+                                              width: 4,
+                                            ),
+                                          ),
+                                          color: _tenseAccentColor.withOpacity(
+                                            0.08,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            if ((tenseData[tense]?['conjugation'] ??
+                                                    '')
+                                                .isNotEmpty)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
                                                     ),
-                                                  ],
+                                                decoration: BoxDecoration(
+                                                  color: _tenseAccentColor,
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
                                                 ),
+                                                child: Text.rich(
+                                                  TextSpan(
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      fontSize: 12,
+                                                    ),
+                                                    children: [
+                                                      TextSpan(
+                                                        text:
+                                                            tenseData[tense]?['conjugation'] ??
+                                                            '',
+                                                      ),
+                                                      TextSpan(
+                                                        text: ' ($tense)',
+                                                        style: const TextStyle(
+                                                          fontStyle:
+                                                              FontStyle.italic,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              (tenseData[tense]?['example'] ??
+                                                          '')
+                                                      .isNotEmpty
+                                                  ? 'Example: ${tenseData[tense]?['example'] ?? ''}'
+                                                  : 'Example: -',
+                                              style: const TextStyle(
+                                                fontStyle: FontStyle.italic,
                                               ),
                                             ),
                                           ],
-                                          if ((tenseData[tense]?['example'] ??
-                                                  '')
-                                              .isNotEmpty) ...[
-                                            const SizedBox(height: 8),
-                                            Container(
-                                              width: double.infinity,
-                                              padding:
-                                                  const EdgeInsets.fromLTRB(
-                                                    10,
-                                                    8,
-                                                    10,
-                                                    8,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                border: Border(
-                                                  left: BorderSide(
-                                                    color: _tenseAccentColor,
-                                                    width: 4,
-                                                  ),
-                                                ),
-                                                color: _tenseAccentColor
-                                                    .withOpacity(0.06),
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              child: Text(
-                                                tenseData[tense]?['example'] ??
-                                                    '',
-                                                style: const TextStyle(
-                                                  fontSize: 15,
-                                                  fontStyle: FontStyle.italic,
-                                                  color: Colors.black87,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
+                                        ),
                                       ),
                                     ),
                                   )

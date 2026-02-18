@@ -16,6 +16,15 @@ class DBHelper {
   // NEW: Notes Table Name
   static const String tableNotes = "notes";
 
+  Future<bool> _columnExists(
+    Database db,
+    String table,
+    String column,
+  ) async {
+    final result = await db.rawQuery('PRAGMA table_info($table)');
+    return result.any((row) => row['name'] == column);
+  }
+
   Future<Database> get db async {
     if (_db != null) return _db!;
     _db = await initDb();
@@ -204,9 +213,16 @@ class DBHelper {
 
         // NEW: Upgrade logic for Version 13 (Vocabulary related forms)
         if (oldVersion < 13) {
-          await db.execute(
-            "ALTER TABLE $tableVocab ADD COLUMN related_forms TEXT",
+          final hasColumn = await _columnExists(
+            db,
+            tableVocab,
+            'related_forms',
           );
+          if (!hasColumn) {
+            await db.execute(
+              "ALTER TABLE $tableVocab ADD COLUMN related_forms TEXT",
+            );
+          }
         }
       },
     );
