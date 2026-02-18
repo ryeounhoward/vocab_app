@@ -1,3 +1,4 @@
+import 'dart:convert'; // Added for jsonDecode
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -26,16 +27,27 @@ class _ReviewPageState extends State<ReviewPage> {
 
   Map<String, String>? _currentVoice;
 
+  // --- ADDED: Tense Configuration from WordDetailPage ---
+  final List<String> _tenseOrder = const [
+    'Present Tense',
+    'Past Tense',
+    'Present Participle',
+    'Past Participle',
+    'Present Perfect',
+    'Past Perfect',
+    'Future Perfect',
+  ];
+  static const Color _tenseAccentColor = Colors.indigo;
+  // ------------------------------------------------------
+
   @override
   void initState() {
     super.initState();
     _initTts();
     _loadAndShuffle();
-    // Start listening for the refresh signal
     DataRefreshSignal.refreshNotifier.addListener(_onGlobalRefresh);
   }
 
-  // FIX: This was missing! This method runs when the Sort page saves data.
   void _onGlobalRefresh() {
     if (mounted) {
       _loadAndShuffle();
@@ -44,7 +56,6 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   void dispose() {
-    // Stop listening to prevent memory leaks
     DataRefreshSignal.refreshNotifier.removeListener(_onGlobalRefresh);
     flutterTts.stop();
     _pageController?.dispose();
@@ -69,9 +80,7 @@ class _ReviewPageState extends State<ReviewPage> {
 
   void _loadAndShuffle() async {
     final data = await dbHelper.queryAll(DBHelper.tableVocab);
-
     final prefs = await SharedPreferences.getInstance();
-    // IMPORTANT: Force the app to see the latest changes on the disk
     await prefs.reload();
 
     final bool useAllWords = prefs.getBool('quiz_use_all_words') ?? true;
@@ -217,6 +226,34 @@ class _ReviewPageState extends State<ReviewPage> {
     if (newStatus == 1) _playFavoriteSound();
   }
 
+  // --- ADDED: Tense Parser from WordDetailPage ---
+  // Adjusted to accept a specific 'item' instead of using a global 'currentItem'
+  Map<String, Map<String, String>> _parseTenseData(Map<String, dynamic> item) {
+    final raw = (item['tense_data'] as String? ?? '').trim();
+    if (raw.isEmpty) return {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return {};
+
+      final Map<String, Map<String, String>> result = {};
+      for (final tense in _tenseOrder) {
+        final value = decoded[tense];
+        if (value is! Map<String, dynamic>) continue;
+
+        final conjugation = (value['conjugation'] ?? '').toString().trim();
+        final example = (value['example'] ?? '').toString().trim();
+        if (conjugation.isEmpty && example.isEmpty) continue;
+
+        result[tense] = {'conjugation': conjugation, 'example': example};
+      }
+      return result;
+    } catch (_) {
+      return {};
+    }
+  }
+  // -----------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -262,7 +299,11 @@ class _ReviewPageState extends State<ReviewPage> {
         .split('\n')
         .where((String e) => e.trim().isNotEmpty)
         .toList();
+    // Added pronunciation and tense data extraction
+    final pronunciation = (item['pronunciation'] as String? ?? '').trim();
     String synonyms = (item['synonyms'] as String? ?? '').trim();
+    final tenseData = _parseTenseData(item);
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -273,6 +314,7 @@ class _ReviewPageState extends State<ReviewPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // --- Image & Favorite Button ---
               Stack(
                 children: [
                   AspectRatio(
@@ -304,6 +346,7 @@ class _ReviewPageState extends State<ReviewPage> {
                         icon: Icon(
                           isFav ? Icons.star : Icons.star_border,
                           color: isFav ? Colors.yellow : Colors.white,
+                          size: 30,
                         ),
                         onPressed: () => _toggleFav(indexInList, item),
                       ),
@@ -311,34 +354,51 @@ class _ReviewPageState extends State<ReviewPage> {
                   ),
                 ],
               ),
+              // --- Detail Content ---
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // --- Header: Word, Type, Pronunciation, Audio ---
                     Row(
                       children: [
                         Expanded(
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text.rich(
                                 TextSpan(
-                                  text: "${item['word'] ?? ''} ",
-                                  style: const TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  children: [
+                                    TextSpan(
+                                      text: "${item['word'] ?? ''} ",
+                                      style: const TextStyle(
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: "(${item['word_type'] ?? ''})",
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                TextSpan(
-                                  text: "(${item['word_type'] ?? ''})",
+                              ),
+                              if (pronunciation.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  pronunciation,
                                   style: const TextStyle(
                                     fontSize: 18,
-                                    color: Colors.blueGrey,
                                     fontStyle: FontStyle.italic,
+                                    color: Colors.indigo,
                                   ),
                                 ),
                               ],
-                            ),
+                            ],
                           ),
                         ),
                         IconButton(
@@ -358,6 +418,8 @@ class _ReviewPageState extends State<ReviewPage> {
                       ],
                     ),
                     const Divider(height: 30),
+
+                    // --- Meaning ---
                     const Text(
                       "Meaning",
                       style: TextStyle(
@@ -371,6 +433,8 @@ class _ReviewPageState extends State<ReviewPage> {
                       style: const TextStyle(fontSize: 18, height: 1.4),
                     ),
                     const SizedBox(height: 20),
+
+                    // --- Synonyms ---
                     if (synonyms.isNotEmpty) ...[
                       const Text(
                         "Synonyms",
@@ -380,9 +444,107 @@ class _ReviewPageState extends State<ReviewPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(synonyms, style: const TextStyle(fontSize: 16)),
+                      Text(
+                        synonyms,
+                        style: const TextStyle(fontSize: 16, height: 1.3),
+                      ),
                       const SizedBox(height: 20),
                     ],
+
+                    // --- Tense / Conjugation (New) ---
+                    if (tenseData.isNotEmpty) ...[
+                      const Text(
+                        "Tense / Form Conjugation",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.indigo,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ..._tenseOrder
+                          .where((t) => tenseData.containsKey(t))
+                          .map(
+                            (tense) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '$tense:',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  if ((tenseData[tense]?['conjugation'] ?? '')
+                                      .isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _tenseAccentColor,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        tenseData[tense]?['conjugation'] ?? '',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  if ((tenseData[tense]?['example'] ?? '')
+                                      .isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.fromLTRB(
+                                        10,
+                                        8,
+                                        10,
+                                        8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        border: const Border(
+                                          left: BorderSide(
+                                            color: _tenseAccentColor,
+                                            width: 4,
+                                          ),
+                                        ),
+                                        color: _tenseAccentColor.withOpacity(
+                                          0.06,
+                                        ),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        tenseData[tense]?['example'] ?? '',
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontStyle: FontStyle.italic,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      const SizedBox(height: 8),
+                    ],
+
+                    const SizedBox(height: 5),
+
+                    // --- Examples ---
                     if (examplesList.isNotEmpty) ...[
                       const Text(
                         "Examples",
@@ -392,20 +554,36 @@ class _ReviewPageState extends State<ReviewPage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      ...examplesList.map(
-                        (example) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Text(
-                            "• $example",
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontStyle: FontStyle.italic,
+                      ...examplesList
+                          .map(
+                            (example) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "• ",
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      example,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontStyle: FontStyle.italic,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ),
-                      ),
+                          )
+                          .toList(),
                     ],
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),

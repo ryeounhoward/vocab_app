@@ -20,6 +20,8 @@ class AddEditPage extends StatefulWidget {
 }
 
 class _AddEditPageState extends State<AddEditPage> {
+  static const String _defaultWordGroupPrefKey = 'default_word_group_id';
+
   final _formKey = GlobalKey<FormState>();
   final dbHelper = DBHelper();
 
@@ -33,19 +35,34 @@ class _AddEditPageState extends State<AddEditPage> {
   String _aiSystemInstructions = defaultGeminiVocabInstructions;
 
   final TextEditingController _wordController = TextEditingController();
+  final TextEditingController _pronunciationController =
+      TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _synonymsController = TextEditingController();
   final TextEditingController _urlController = TextEditingController();
 
   List<TextEditingController> _exampleControllers = [TextEditingController()];
+  final List<String> _tenseOrder = const [
+    'Present Tense',
+    'Past Tense',
+    'Present Participle',
+    'Past Participle',
+    'Present Perfect',
+    'Past Perfect',
+    'Future Perfect',
+  ];
+  late final Map<String, TextEditingController> _tenseConjugationControllers;
+  late final Map<String, TextEditingController> _tenseExampleControllers;
 
   String? _wordType = 'Noun';
   String? _imagePath;
   bool _isDownloading = false;
+  bool _showTenseConjugationForm = true;
 
   // Word group selection
   List<Map<String, dynamic>> _wordGroups = [];
   int? _selectedGroupId;
+  int? _defaultGroupId;
 
   final List<String> _types = [
     'Noun',
@@ -63,10 +80,17 @@ class _AddEditPageState extends State<AddEditPage> {
   @override
   void initState() {
     super.initState();
+    _tenseConjugationControllers = {
+      for (final tense in _tenseOrder) tense: TextEditingController(),
+    };
+    _tenseExampleControllers = {
+      for (final tense in _tenseOrder) tense: TextEditingController(),
+    };
     _loadGeminiSettings();
     _loadWordGroups();
     if (widget.vocabItem != null) {
       _wordController.text = widget.vocabItem!['word'] ?? "";
+      _pronunciationController.text = widget.vocabItem!['pronunciation'] ?? "";
       _descController.text = widget.vocabItem!['description'] ?? "";
       _synonymsController.text = widget.vocabItem!['synonyms'] ?? "";
       _wordType = widget.vocabItem!['word_type'];
@@ -84,17 +108,110 @@ class _AddEditPageState extends State<AddEditPage> {
             .map((String e) => TextEditingController(text: e))
             .toList();
       }
+
+      final String rawTenseData =
+          widget.vocabItem!['tense_data'] as String? ?? '';
+      if (rawTenseData.trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(rawTenseData);
+          if (decoded is Map<String, dynamic>) {
+            for (final tense in _tenseOrder) {
+              final value = decoded[tense];
+              if (value is Map<String, dynamic>) {
+                _tenseConjugationControllers[tense]?.text =
+                    (value['conjugation'] ?? '').toString();
+                _tenseExampleControllers[tense]?.text = (value['example'] ?? '')
+                    .toString();
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _wordController.dispose();
+    _pronunciationController.dispose();
+    _descController.dispose();
+    _synonymsController.dispose();
+    _urlController.dispose();
+    _searchDisposeExamples();
+    for (final controller in _tenseConjugationControllers.values) {
+      controller.dispose();
+    }
+    for (final controller in _tenseExampleControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _searchDisposeExamples() {
+    for (final controller in _exampleControllers) {
+      controller.dispose();
     }
   }
 
   Future<void> _loadWordGroups() async {
     final groups = await dbHelper.getAllWordGroups();
+    final String? defaultGroupRaw = await dbHelper.getPreference(
+      _defaultWordGroupPrefKey,
+    );
+    final int? parsedDefaultGroupId = int.tryParse(defaultGroupRaw ?? '');
+
+    final bool defaultGroupExists =
+        parsedDefaultGroupId != null &&
+        groups.any((g) => g['id'] == parsedDefaultGroupId);
+    final int? resolvedDefaultGroupId = defaultGroupExists
+        ? parsedDefaultGroupId
+        : null;
+
+    if (parsedDefaultGroupId != null && !defaultGroupExists) {
+      await dbHelper.removePreference(_defaultWordGroupPrefKey);
+    }
+
     if (!mounted) return;
+
     setState(() {
       _wordGroups = List<Map<String, dynamic>>.from(groups);
-      // For now we don't pre-select groups for existing words; user can pick one.
-      _selectedGroupId = null;
+      _defaultGroupId = resolvedDefaultGroupId;
+
+      if (widget.vocabItem == null) {
+        _selectedGroupId = resolvedDefaultGroupId;
+      }
     });
+  }
+
+  Future<void> _setSelectedAsDefaultGroup() async {
+    if (_selectedGroupId == null) return;
+
+    await dbHelper.setPreference(
+      _defaultWordGroupPrefKey,
+      _selectedGroupId!.toString(),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _defaultGroupId = _selectedGroupId;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Default word group updated.')),
+    );
+  }
+
+  Future<void> _clearDefaultGroup() async {
+    await dbHelper.removePreference(_defaultWordGroupPrefKey);
+
+    if (!mounted) return;
+    setState(() {
+      _defaultGroupId = null;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Default word group cleared.')),
+    );
   }
 
   Future<void> _loadGeminiSettings() async {
@@ -183,6 +300,7 @@ class _AddEditPageState extends State<AddEditPage> {
 
         setState(() {
           _wordController.text = data['word'] ?? inputWord;
+          _pronunciationController.text = data['pronunciation'] ?? "";
           _descController.text = data['meaning'] ?? "";
           _synonymsController.text = data['synonyms'] ?? "";
 
@@ -204,6 +322,7 @@ class _AddEditPageState extends State<AddEditPage> {
           // Handle Examples
           List<dynamic> aiExamples = data['examples'] ?? [];
           if (aiExamples.isNotEmpty) {
+            _searchDisposeExamples();
             _exampleControllers = aiExamples
                 .map((e) => TextEditingController(text: e.toString()))
                 .toList();
@@ -227,22 +346,150 @@ class _AddEditPageState extends State<AddEditPage> {
     }
   }
 
-  String? _extractBetween(String source, String start, String? end) {
-    final startIndex = source.indexOf(start);
-    if (startIndex == -1) return null;
-    final contentStart = startIndex + start.length;
+  String? _extractByLabels(
+    String source,
+    String label,
+    List<String> nextLabels,
+  ) {
+    final escapedLabel = RegExp.escape(label);
+    final pattern = nextLabels.isEmpty
+        ? RegExp(
+            '^\\s*$escapedLabel\\s*:\\s*(.*?)\\s*\\z',
+            multiLine: true,
+            dotAll: true,
+            caseSensitive: false,
+          )
+        : RegExp(
+            '^\\s*$escapedLabel\\s*:\\s*(.*?)(?=^\\s*(?:${nextLabels.map(RegExp.escape).join('|')})\\s*:|\\z)',
+            multiLine: true,
+            dotAll: true,
+            caseSensitive: false,
+          );
 
-    int endIndex;
-    if (end != null) {
-      endIndex = source.indexOf(end, contentStart);
-      if (endIndex == -1) {
-        endIndex = source.length;
+    final match = pattern.firstMatch(source);
+    final value = match?.group(1)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  String? _normalizeType(String? type) {
+    if (type == null) return null;
+    final raw = type.trim();
+    if (raw.isEmpty) return null;
+    return "${raw[0].toUpperCase()}${raw.substring(1).toLowerCase()}";
+  }
+
+  String _canonicalTense(String input) {
+    final value = input.trim().toLowerCase();
+    switch (value) {
+      case 'present tense':
+        return 'Present Tense';
+      case 'past tense':
+        return 'Past Tense';
+      case 'present participle':
+        return 'Present Participle';
+      case 'past participle':
+        return 'Past Participle';
+      case 'present perfect':
+        return 'Present Perfect';
+      case 'past perfect':
+        return 'Past Perfect';
+      case 'future perfect':
+        return 'Future Perfect';
+      default:
+        return input.trim();
+    }
+  }
+
+  bool _isKnownTense(String line) {
+    final normalized = _canonicalTense(line.replaceAll(':', '').trim());
+    return _tenseOrder.contains(normalized);
+  }
+
+  Map<String, Map<String, String>> _parseTenseDataFromText(String source) {
+    final Map<String, Map<String, String>> result = {
+      for (final tense in _tenseOrder)
+        tense: {'conjugation': '', 'example': ''},
+    };
+
+    final lines = source.split(RegExp(r'\r?\n'));
+    final tenseHeadingRegex = RegExp(
+      r'^(Present Tense|Past Tense|Present Participle|Past Participle|Present Perfect|Past Perfect|Future Perfect)\s*:?(.*)$',
+      caseSensitive: false,
+    );
+
+    String? currentTense;
+    bool appendingExample = false;
+
+    for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (line.isEmpty) {
+        appendingExample = false;
+        continue;
       }
-    } else {
-      endIndex = source.length;
+
+      final headingMatch = tenseHeadingRegex.firstMatch(line);
+      if (headingMatch != null) {
+        currentTense = _canonicalTense(headingMatch.group(1) ?? '');
+        appendingExample = false;
+
+        final trailing = (headingMatch.group(2) ?? '').trim();
+        if (trailing.isNotEmpty &&
+            !trailing.toLowerCase().startsWith('conjugation:') &&
+            !trailing.toLowerCase().startsWith('example:')) {
+          result[currentTense]?['conjugation'] = trailing;
+        }
+        continue;
+      }
+
+      final lower = line.toLowerCase();
+      if (lower.startsWith('word:') ||
+          lower.startsWith('pronunciation:') ||
+          lower.startsWith('type of speech:') ||
+          lower.startsWith('type:') ||
+          lower.startsWith('meaning:') ||
+          lower.startsWith('synonyms:') ||
+          lower.startsWith('tense / form')) {
+        currentTense = null;
+        appendingExample = false;
+        continue;
+      }
+
+      if (currentTense == null) continue;
+
+      if (lower.startsWith('conjugation:')) {
+        result[currentTense]?['conjugation'] = line
+            .substring('conjugation:'.length)
+            .trim();
+        appendingExample = false;
+        continue;
+      }
+
+      if (lower.startsWith('example:')) {
+        result[currentTense]?['example'] = line
+            .substring('example:'.length)
+            .trim();
+        appendingExample = true;
+        continue;
+      }
+
+      if (appendingExample && !_isKnownTense(line)) {
+        final currentExample = result[currentTense]?['example'] ?? '';
+        result[currentTense]?['example'] = currentExample.isEmpty
+            ? line
+            : '$currentExample $line';
+      }
     }
 
-    return source.substring(contentStart, endIndex).trim();
+    return {
+      for (final entry in result.entries)
+        if (entry.value['conjugation']!.trim().isNotEmpty ||
+            entry.value['example']!.trim().isNotEmpty)
+          entry.key: {
+            'conjugation': entry.value['conjugation']!.trim(),
+            'example': entry.value['example']!.trim(),
+          },
+    };
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -257,50 +504,126 @@ class _AddEditPageState extends State<AddEditPage> {
     }
 
     try {
-      final word = _extractBetween(text, 'Word:', 'Type of Speech:');
-      final type = _extractBetween(text, 'Type of Speech:', 'Meaning:');
-      final meaning = _extractBetween(text, 'Meaning:', 'Synonyms:');
-      final synonyms = _extractBetween(text, 'Synonyms:', 'Example 1:');
-      final example1 = _extractBetween(text, 'Example 1:', 'Example 2:');
-      final example2 = _extractBetween(text, 'Example 2:', 'Example 3:');
-      final example3 = _extractBetween(text, 'Example 3:', null);
+      bool pastedTenseWhileHidden = false;
 
-      if (word == null || type == null) {
+      final word = _extractByLabels(text, 'Word', [
+        'Pronunciation',
+        'Type of Speech',
+        'Type',
+        'Meaning',
+        'Synonyms',
+      ]);
+      final pronunciation = _extractByLabels(text, 'Pronunciation', [
+        'Type of Speech',
+        'Type',
+        'Meaning',
+        'Synonyms',
+        'Present Tense',
+      ]);
+      final type =
+          _extractByLabels(text, 'Type of Speech', ['Meaning', 'Synonyms']) ??
+          _extractByLabels(text, 'Type', ['Meaning', 'Synonyms']);
+      final meaning = _extractByLabels(text, 'Meaning', [
+        'Synonyms',
+        'Example 1',
+        'Present Tense',
+      ]);
+      final synonyms = _extractByLabels(text, 'Synonyms', [
+        'Example 1',
+        'Present Tense',
+      ]);
+
+      final numberedExamples =
+          RegExp(
+                r'^\s*Example\s*\d+\s*:\s*(.+)$',
+                multiLine: true,
+                caseSensitive: false,
+              )
+              .allMatches(text)
+              .map((m) => (m.group(1) ?? '').trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+
+      final tenseData = _parseTenseDataFromText(text);
+
+      if (word == null &&
+          pronunciation == null &&
+          type == null &&
+          tenseData.isEmpty &&
+          numberedExamples.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Clipboard format not recognized.')),
         );
         return;
       }
 
-      // Normalize type similar to AI handling
-      String rawType = type.trim();
-      String capitalizedType = rawType.isNotEmpty
-          ? "${rawType[0].toUpperCase()}${rawType.substring(1).toLowerCase()}"
-          : 'Noun';
+      final normalizedType = _normalizeType(type);
 
       setState(() {
-        _wordController.text = word;
-        _descController.text = meaning ?? '';
-        _synonymsController.text = synonyms ?? '';
-
-        if (_types.contains(capitalizedType)) {
-          _wordType = capitalizedType;
-        } else {
-          if (!_types.contains(capitalizedType)) {
-            _types.add(capitalizedType);
-          }
-          _wordType = capitalizedType;
+        if (word != null) {
+          _wordController.text = word;
+        }
+        if (pronunciation != null) {
+          _pronunciationController.text = pronunciation;
+        }
+        if (meaning != null) {
+          _descController.text = meaning;
+        }
+        if (synonyms != null) {
+          _synonymsController.text = synonyms;
         }
 
-        _exampleControllers = [
-          TextEditingController(text: example1 ?? ''),
-          TextEditingController(text: example2 ?? ''),
-          TextEditingController(text: example3 ?? ''),
-        ];
+        if (normalizedType != null) {
+          if (!_types.contains(normalizedType)) {
+            _types.add(normalizedType);
+          }
+          _wordType = normalizedType;
+        }
+
+        if (numberedExamples.isNotEmpty) {
+          _searchDisposeExamples();
+          _exampleControllers = numberedExamples
+              .map((e) => TextEditingController(text: e))
+              .toList();
+        }
+
+        if (tenseData.isNotEmpty) {
+          pastedTenseWhileHidden = !_showTenseConjugationForm;
+          for (final tense in _tenseOrder) {
+            final parsed = tenseData[tense];
+            if (parsed == null) continue;
+            final conjugation = (parsed['conjugation'] ?? '').trim();
+            final example = (parsed['example'] ?? '').trim();
+
+            if (conjugation.isNotEmpty) {
+              _tenseConjugationControllers[tense]?.text = conjugation;
+            }
+            if (example.isNotEmpty) {
+              _tenseExampleControllers[tense]?.text = example;
+            }
+          }
+        }
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Text pasted into fields successfully.')),
+        SnackBar(
+          content: Text(
+            tenseData.isNotEmpty
+                ? 'Text pasted. Detected ${tenseData.length} tense form(s).'
+                : 'Text pasted into fields successfully.',
+          ),
+          action: pastedTenseWhileHidden
+              ? SnackBarAction(
+                  label: 'SHOW',
+                  onPressed: () {
+                    if (!mounted) return;
+                    setState(() {
+                      _showTenseConjugationForm = true;
+                    });
+                  },
+                )
+              : null,
+        ),
       );
     } catch (_) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -352,6 +675,20 @@ class _AddEditPageState extends State<AddEditPage> {
     }
   }
 
+  String _buildTenseDataForSave() {
+    final Map<String, Map<String, String>> payload = {};
+    for (final tense in _tenseOrder) {
+      final conjugation =
+          _tenseConjugationControllers[tense]?.text.trim() ?? '';
+      final example = _tenseExampleControllers[tense]?.text.trim() ?? '';
+      if (conjugation.isEmpty && example.isEmpty) continue;
+      payload[tense] = {'conjugation': conjugation, 'example': example};
+    }
+
+    if (payload.isEmpty) return '';
+    return jsonEncode(payload);
+  }
+
   void _save() async {
     if (_formKey.currentState!.validate()) {
       if (_urlController.text.isNotEmpty &&
@@ -363,11 +700,14 @@ class _AddEditPageState extends State<AddEditPage> {
           .map((c) => c.text.trim())
           .where((t) => t.isNotEmpty)
           .join('\n');
+      final tenseData = _buildTenseDataForSave();
       final data = {
         'word': _wordController.text,
+        'pronunciation': _pronunciationController.text.trim(),
         'description': _descController.text,
         'synonyms': _synonymsController.text.trim(),
         'examples': allExamples,
+        'tense_data': tenseData,
         'word_type': _wordType,
         'image_path': _imagePath,
       };
@@ -400,9 +740,31 @@ class _AddEditPageState extends State<AddEditPage> {
       appBar: AppBar(
         title: Text(widget.vocabItem == null ? "Add Word" : "Edit Word"),
       ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: SizedBox(
+          height: 55,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: _isDownloading || _isGenerating ? null : _save,
+            child: _isDownloading
+                ? const CircularProgressIndicator(color: Colors.white)
+                : const Text(
+                    "SAVE VOCABULARY",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+          ),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 40.0),
+          padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
           child: Form(
             key: _formKey,
             child: Column(
@@ -495,6 +857,35 @@ class _AddEditPageState extends State<AddEditPage> {
                           value: g['id'] as int?,
                           label: (g['name'] ?? '').toString(),
                         ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _defaultGroupId == null
+                              ? 'Default group: None'
+                              : 'Default group: ${_wordGroups.firstWhere((g) => g['id'] == _defaultGroupId, orElse: () => <String, dynamic>{'name': 'None'})['name']}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _selectedGroupId == null
+                            ? null
+                            : _setSelectedAsDefaultGroup,
+                        icon: const Icon(Icons.push_pin_outlined, size: 16),
+                        label: const Text('Set Default'),
+                      ),
+                      TextButton(
+                        onPressed: _defaultGroupId == null
+                            ? null
+                            : _clearDefaultGroup,
+                        child: const Text('Clear'),
                       ),
                     ],
                   ),
@@ -609,6 +1000,12 @@ class _AddEditPageState extends State<AddEditPage> {
                 const SizedBox(height: 15),
 
                 TextFormField(
+                  controller: _pronunciationController,
+                  decoration: _inputStyle("Pronunciation"),
+                ),
+                const SizedBox(height: 15),
+
+                TextFormField(
                   controller: _descController,
                   maxLines: 4,
                   decoration: _inputStyle("Definition"),
@@ -645,7 +1042,12 @@ class _AddEditPageState extends State<AddEditPage> {
                           ),
                           onPressed: () {
                             if (_exampleControllers.length > 1) {
-                              setState(() => _exampleControllers.removeAt(idx));
+                              setState(() {
+                                final removed = _exampleControllers.removeAt(
+                                  idx,
+                                );
+                                removed.dispose();
+                              });
                             }
                           },
                         ),
@@ -661,25 +1063,66 @@ class _AddEditPageState extends State<AddEditPage> {
                   label: const Text("Add Another Example"),
                 ),
                 const SizedBox(height: 20),
-                SizedBox(
-                  height: 55,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        "Tense / Form Conjugation",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
-                    onPressed: _isDownloading || _isGenerating ? null : _save,
-                    child: _isDownloading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text(
-                            "SAVE VOCABULARY",
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                  ),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _showTenseConjugationForm =
+                              !_showTenseConjugationForm;
+                        });
+                      },
+                      icon: Icon(
+                        _showTenseConjugationForm
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                        size: 18,
+                      ),
+                      label: Text(_showTenseConjugationForm ? 'Hide' : 'Show'),
+                    ),
+                  ],
                 ),
+                if (_showTenseConjugationForm) ...[
+                  const SizedBox(height: 10),
+                  ..._tenseOrder.map((tense) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            tense,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Colors.indigo,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _tenseConjugationControllers[tense],
+                            decoration: _inputStyle('$tense Conjugation'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _tenseExampleControllers[tense],
+                            maxLines: 2,
+                            decoration: _inputStyle('$tense Example'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+                const SizedBox(height: 12),
               ],
             ),
           ),

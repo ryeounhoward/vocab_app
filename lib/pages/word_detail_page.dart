@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -17,6 +18,16 @@ class _WordDetailPageState extends State<WordDetailPage> {
   final dbHelper = DBHelper();
   final FlutterTts flutterTts = FlutterTts();
   late Map<String, dynamic> currentItem;
+  final List<String> _tenseOrder = const [
+    'Present Tense',
+    'Past Tense',
+    'Present Participle',
+    'Past Participle',
+    'Present Perfect',
+    'Past Perfect',
+    'Future Perfect',
+  ];
+  static const Color _tenseAccentColor = Colors.indigo;
 
   // FIX 1: Add a variable to store the preferred voice
   Map<String, String>? _currentVoice;
@@ -97,7 +108,6 @@ class _WordDetailPageState extends State<WordDetailPage> {
     }
 
     // FIX 3: Force set the voice again right before speaking
-    // This ensures the voice is correct even if the app was in background
     if (_currentVoice != null) {
       await flutterTts.setVoice(_currentVoice!);
     }
@@ -108,7 +118,6 @@ class _WordDetailPageState extends State<WordDetailPage> {
   void _toggleFav() async {
     int newStatus = (currentItem['is_favorite'] == 1) ? 0 : 1;
 
-    // Updated to include table name for consistency with your other pages
     await dbHelper.toggleFavorite(
       currentItem['id'],
       newStatus == 1,
@@ -124,6 +133,31 @@ class _WordDetailPageState extends State<WordDetailPage> {
     }
   }
 
+  Map<String, Map<String, String>> _parseTenseData() {
+    final raw = (currentItem['tense_data'] as String? ?? '').trim();
+    if (raw.isEmpty) return {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return {};
+
+      final Map<String, Map<String, String>> result = {};
+      for (final tense in _tenseOrder) {
+        final value = decoded[tense];
+        if (value is! Map<String, dynamic>) continue;
+
+        final conjugation = (value['conjugation'] ?? '').toString().trim();
+        final example = (value['example'] ?? '').toString().trim();
+        if (conjugation.isEmpty && example.isEmpty) continue;
+
+        result[tense] = {'conjugation': conjugation, 'example': example};
+      }
+      return result;
+    } catch (_) {
+      return {};
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     bool isFav = currentItem['is_favorite'] == 1;
@@ -131,7 +165,10 @@ class _WordDetailPageState extends State<WordDetailPage> {
         .split('\n')
         .where((String e) => e.trim().isNotEmpty)
         .toList();
+    final pronunciation = (currentItem['pronunciation'] as String? ?? '')
+        .trim();
     String synonyms = (currentItem['synonyms'] as String? ?? '').trim();
+    final tenseData = _parseTenseData();
 
     return Scaffold(
       appBar: AppBar(
@@ -201,27 +238,46 @@ class _WordDetailPageState extends State<WordDetailPage> {
                           Row(
                             children: [
                               Expanded(
-                                child: Text.rich(
-                                  TextSpan(
-                                    children: [
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Word and Type
+                                    Text.rich(
                                       TextSpan(
-                                        text: "${currentItem['word'] ?? ''} ",
-                                        style: const TextStyle(
-                                          fontSize: 32,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                        children: [
+                                          TextSpan(
+                                            text:
+                                                "${currentItem['word'] ?? ''} ",
+                                            style: const TextStyle(
+                                              fontSize: 32,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          TextSpan(
+                                            text:
+                                                "(${currentItem['word_type'] ?? ''})",
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              color: Colors.blueGrey,
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      TextSpan(
-                                        text:
-                                            "(${currentItem['word_type'] ?? ''})",
+                                    ),
+                                    // Pronunciation (Fixed Syntax)
+                                    if (pronunciation.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        pronunciation,
                                         style: const TextStyle(
                                           fontSize: 18,
-                                          color: Colors.blueGrey,
                                           fontStyle: FontStyle.italic,
+                                          color: Colors.indigo,
                                         ),
                                       ),
                                     ],
-                                  ),
+                                  ],
                                 ),
                               ),
                               IconButton(
@@ -272,6 +328,99 @@ class _WordDetailPageState extends State<WordDetailPage> {
                             const SizedBox(height: 20),
                           ],
 
+                          if (tenseData.isNotEmpty) ...[
+                            const Text(
+                              "Tense / Form Conjugation",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.indigo,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ..._tenseOrder
+                                .where((t) => tenseData.containsKey(t))
+                                .map(
+                                  (tense) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '$tense:',
+                                          style: const TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                        if ((tenseData[tense]?['conjugation'] ??
+                                                '')
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _tenseAccentColor,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              tenseData[tense]?['conjugation'] ??
+                                                  '',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                        if ((tenseData[tense]?['example'] ?? '')
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.fromLTRB(
+                                              10,
+                                              8,
+                                              10,
+                                              8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              border: const Border(
+                                                left: BorderSide(
+                                                  color: _tenseAccentColor,
+                                                  width: 4,
+                                                ),
+                                              ),
+                                              color: _tenseAccentColor
+                                                  .withOpacity(0.06),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              tenseData[tense]?['example'] ??
+                                                  '',
+                                              style: const TextStyle(
+                                                fontSize: 15,
+                                                fontStyle: FontStyle.italic,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            const SizedBox(height: 8),
+                          ],
+
                           const SizedBox(height: 5),
                           if (examplesList.isNotEmpty) ...[
                             const Text(
@@ -282,33 +431,20 @@ class _WordDetailPageState extends State<WordDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            ...examplesList.map(
-                              (example) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8.0),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      "• ",
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
+                            ...examplesList
+                                .map(
+                                  (example) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8.0),
+                                    child: Text(
+                                      "• $example",
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontStyle: FontStyle.italic,
                                       ),
                                     ),
-                                    Expanded(
-                                      child: Text(
-                                        example,
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontStyle: FontStyle.italic,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
+                                  ),
+                                )
+                                .toList(),
                           ],
                         ],
                       ),

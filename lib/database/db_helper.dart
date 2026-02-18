@@ -26,16 +26,18 @@ class DBHelper {
     String path = join(await getDatabasesPath(), "vocab.db");
     return await openDatabase(
       path,
-      // NEW: Incremented version to 10 to trigger the update
-      version: 10,
+      // NEW: Incremented version to 12 to add pronunciation for vocabulary
+      version: 12,
       onCreate: (db, version) async {
         // Create Vocabulary Table
         await db.execute('''
         CREATE TABLE $tableVocab (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           word TEXT,
+          pronunciation TEXT,
           description TEXT,
           examples TEXT,
+          tense_data TEXT,
           word_type TEXT,
           image_path TEXT,
           synonyms TEXT,
@@ -183,6 +185,20 @@ class DBHelper {
               date TEXT
             )
           ''');
+        }
+
+        // NEW: Upgrade logic for Version 11 (Vocabulary tense/conjugation data)
+        if (oldVersion < 11) {
+          await db.execute(
+            "ALTER TABLE $tableVocab ADD COLUMN tense_data TEXT",
+          );
+        }
+
+        // NEW: Upgrade logic for Version 12 (Vocabulary pronunciation)
+        if (oldVersion < 12) {
+          await db.execute(
+            "ALTER TABLE $tableVocab ADD COLUMN pronunciation TEXT",
+          );
         }
       },
     );

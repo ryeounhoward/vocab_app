@@ -1777,7 +1777,7 @@ class _VocabularyTestPageState extends State<VocabularyTestPage> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: SafeArea(top: false, child: _buildBody()),
     );
   }
 
