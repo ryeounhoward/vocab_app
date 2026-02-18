@@ -16,8 +16,8 @@ class VocabularyTestPage extends StatefulWidget {
 
   const VocabularyTestPage({
     super.key,
-    required this.parentTabIndex,
-    required this.myTabIndex,
+    this.parentTabIndex = 0,
+    this.myTabIndex = 0,
   });
 
   @override

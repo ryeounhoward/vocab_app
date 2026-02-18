@@ -53,10 +53,89 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   final GoogleDriveService _googleDriveService = GoogleDriveService();
 
   static const String _fullBackupZipFileName = 'app_full_backup.zip';
+  static const String _cheatSheetPrefsKey = 'cheat_sheet_docs_v1';
   static const String _googleDriveIconAsset =
       'assets/images/Google_Drive_icon_(2020).svg';
 
   String _loadingMessage = '';
+
+  String _formatDriveTime(DateTime? t) {
+    if (t == null) return '-';
+    final local = t.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
+  }
+
+  String _formatMb(int bytes) {
+    if (bytes <= 0) return '-';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+
+  Future<DriveFileRevision?> _pickDriveRevision() async {
+    try {
+      final revisions = await _googleDriveService.listFileRevisionsByName(
+        _fullBackupZipFileName,
+        interactive: true,
+        pageSize: 100,
+      );
+
+      if (revisions.isEmpty) {
+        if (!mounted) return null;
+        _showSnackBar('No backup versions found in Google Drive.');
+        return null;
+      }
+
+      if (!mounted) return null;
+      return showDialog<DriveFileRevision>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Select backup version'),
+            content: SizedBox(
+              width: 420,
+              height: 360,
+              child: ListView.separated(
+                itemCount: revisions.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final item = revisions[index];
+                  final isLatest = index == 0;
+                  return ListTile(
+                    leading: Icon(
+                      isLatest ? Icons.new_releases : Icons.history,
+                      color: isLatest ? Colors.indigo : null,
+                    ),
+                    title: Text(_formatDriveTime(item.modifiedTime)),
+                    subtitle: Text(
+                      'Size: ${_formatMb(item.sizeBytes)}${item.keepForever ? '  •  Kept forever' : ''}',
+                    ),
+                    trailing: isLatest
+                        ? const Text(
+                            'Latest',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(context, item),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Failed to load versions: $e');
+      }
+      return null;
+    }
+  }
 
   // --- NOTES IMPORT/EXPORT ---
   Future<void> _exportNotesToJson() async {
@@ -289,6 +368,16 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     return path;
   }
 
+  Future<String> _getCheatSheetsPath() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final path = p.join(directory.path, "cheat_sheets");
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return path;
+  }
+
   // ---------------------------------------------------------
   // 1. ORIGINAL JSON EXPORT (Your Old Code)
   // ---------------------------------------------------------
@@ -430,11 +519,6 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     );
     _updateLoadingProgress(0.05, progressLabel);
 
-    if (vocabData.isEmpty && idiomData.isEmpty) {
-      _showSnackBar("No data found to export");
-      return null;
-    }
-
     // Read sort-words related preferences to include in backup
     final String? quizUseAll = await _dbHelper.getPreference(
       'quiz_use_all_words',
@@ -490,6 +574,27 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
     backupPayload['notes'] = notes;
 
+    // --- Include cheat sheet metadata in backup ---
+    List<dynamic> cheatSheetDocs = const [];
+    final String? cheatSheetRaw = prefs.getString(_cheatSheetPrefsKey);
+    if (cheatSheetRaw != null && cheatSheetRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(cheatSheetRaw);
+        if (decoded is List) cheatSheetDocs = decoded;
+      } catch (_) {}
+    }
+    if (cheatSheetDocs.isNotEmpty) {
+      backupPayload['cheat_sheet_docs'] = cheatSheetDocs;
+    }
+
+    if (vocabData.isEmpty &&
+        idiomData.isEmpty &&
+        notes.isEmpty &&
+        cheatSheetDocs.isEmpty) {
+      _showSnackBar("No data found to export");
+      return null;
+    }
+
     String jsonString = jsonEncode(backupPayload);
     List<int> jsonBytes = utf8.encode(jsonString);
 
@@ -518,35 +623,51 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     );
     encoder.addArchiveFile(jsonArchiveFile);
 
-    // Add Photos from app folder to ZIP, with progress updates.
+    // Add Photos + Cheat Sheet files from app folder to ZIP, with progress updates.
     _updateLoadingProgress(0.20, progressLabel);
+    final List<MapEntry<File, String>> filesToZip = [];
+
     String imagesPath = await _getLocalImagesPath();
     Directory imgDir = Directory(imagesPath);
     if (await imgDir.exists()) {
-      final List<File> files = await imgDir
+      final imageFiles = await imgDir
           .list(followLinks: false)
           .where((entity) => entity is File)
           .cast<File>()
           .toList();
-
-      final int totalFiles = files.length;
-      int processed = 0;
-
-      for (final File file in files) {
-        processed++;
-        final String filename = p.basename(file.path);
-        await encoder.addFile(file, 'images/$filename');
-
-        if (totalFiles > 0) {
-          final double photoFraction = processed / totalFiles;
-          // Photos occupy the middle 70% of the progress bar.
-          final double overallFraction = 0.20 + (photoFraction * 0.70);
-          _updateLoadingProgress(overallFraction, progressLabel);
-        }
-
-        // Yield briefly so the UI can repaint the spinner.
-        await Future.delayed(const Duration(milliseconds: 10));
+      for (final file in imageFiles) {
+        filesToZip.add(MapEntry(file, 'images/${p.basename(file.path)}'));
       }
+    }
+
+    String cheatPath = await _getCheatSheetsPath();
+    Directory cheatDir = Directory(cheatPath);
+    if (await cheatDir.exists()) {
+      final cheatFiles = await cheatDir
+          .list(followLinks: false)
+          .where((entity) => entity is File)
+          .cast<File>()
+          .toList();
+      for (final file in cheatFiles) {
+        filesToZip.add(MapEntry(file, 'cheat_sheets/${p.basename(file.path)}'));
+      }
+    }
+
+    final int totalFiles = filesToZip.length;
+    int processed = 0;
+
+    for (final entry in filesToZip) {
+      processed++;
+      await encoder.addFile(entry.key, entry.value);
+
+      if (totalFiles > 0) {
+        final double fileFraction = processed / totalFiles;
+        final double overallFraction = 0.20 + (fileFraction * 0.70);
+        _updateLoadingProgress(overallFraction, progressLabel);
+      }
+
+      // Yield briefly so the UI can repaint the spinner.
+      await Future.delayed(const Duration(milliseconds: 10));
     }
 
     _updateLoadingProgress(0.93, progressLabel);
@@ -629,6 +750,30 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         }
       }
 
+      // Extract Cheat Sheet files to app storage
+      String localCheatPath = await _getCheatSheetsPath();
+      int cheatFileCount = 0;
+      final List<ArchiveFile> cheatFiles = archive
+          .where((f) => f.isFile && f.name.startsWith('cheat_sheets/'))
+          .cast<ArchiveFile>()
+          .toList();
+      final int totalCheatFiles = cheatFiles.length;
+      for (int i = 0; i < cheatFiles.length; i++) {
+        final file = cheatFiles[i];
+        final String filename = p.basename(file.name);
+        if (filename.isEmpty) continue;
+
+        File localFile = File(p.join(localCheatPath, filename));
+        await localFile.writeAsBytes(file.content as List<int>);
+        cheatFileCount++;
+
+        if (totalCheatFiles > 0 &&
+            (i == 0 || i == totalCheatFiles - 1 || i % 10 == 0)) {
+          final double f = 0.30 + ((i + 1) / totalCheatFiles) * 0.10;
+          _updateLoadingProgress(f, 'Extracting cheat sheets');
+        }
+      }
+
       _updateLoadingProgress(0.35, 'Reading ZIP backup');
 
       // Done with heavy file work; hide the reading dialog before confirm.
@@ -671,12 +816,18 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         notesToProcess = jsonData['notes'] as List<dynamic>;
       }
 
+      // --- Cheat sheet metadata import ---
+      List<dynamic> cheatSheetDocsToProcess = [];
+      if (jsonData is Map && jsonData['cheat_sheet_docs'] is List) {
+        cheatSheetDocsToProcess = jsonData['cheat_sheet_docs'] as List<dynamic>;
+      }
+
       bool? confirm = await showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text("Import ZIP Backup"),
           content: Text(
-            "Found:\n- $photoCount photos\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n- ${notesToProcess.length} notes\n\nContinue?",
+            "Found:\n- $photoCount photos\n- $cheatFileCount cheat sheet files\n- ${vocabToProcess.length} words\n- ${idiomsToProcess.length} idioms\n- ${wordGroupsToProcess.length} word groups\n- ${notesToProcess.length} notes\n- ${cheatSheetDocsToProcess.length} cheat sheet entries\n\nContinue?",
           ),
           actions: [
             TextButton(
@@ -761,10 +912,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
             },
           );
 
+          await _restoreCheatSheetDocs(cheatSheetDocsToProcess);
+
           _updateLoadingProgress(0.99, 'Finalizing import');
 
           _showSnackBar(
-            "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, and $photoCount photos.",
+            "Import Success!\nAdded $addedWords words, $addedIdioms idioms, $createdWordGroups word groups, $addedNotes notes, $photoCount photos, and $cheatFileCount cheat sheet files.",
           );
 
           // --- Refresh notes page if open ---
@@ -785,6 +938,44 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     } finally {
       _hideLoadingDialog();
     }
+  }
+
+  Future<void> _restoreCheatSheetDocs(List<dynamic> docs) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (docs.isEmpty) {
+      await prefs.remove(_cheatSheetPrefsKey);
+      return;
+    }
+
+    final String cheatPath = await _getCheatSheetsPath();
+    final List<Map<String, dynamic>> normalized = [];
+
+    for (final raw in docs) {
+      if (raw is! Map) continue;
+      final map = Map<String, dynamic>.from(raw.cast<String, dynamic>());
+      final String? originalPath = map['filePath']?.toString();
+      if (originalPath == null || originalPath.trim().isEmpty) continue;
+
+      final String fileName = p.basename(originalPath);
+      if (fileName.trim().isEmpty) continue;
+
+      final String newPath = p.join(cheatPath, fileName);
+      final file = File(newPath);
+      if (!await file.exists()) continue;
+
+      map['filePath'] = newPath;
+      final String ext = p
+          .extension(fileName)
+          .toLowerCase()
+          .replaceFirst('.', '');
+      if ((map['fileType']?.toString().trim().isEmpty ?? true) &&
+          ext.isNotEmpty) {
+        map['fileType'] = ext;
+      }
+      normalized.add(map);
+    }
+
+    await prefs.setString(_cheatSheetPrefsKey, jsonEncode(normalized));
   }
 
   Future<void> _importFromZip() async {
@@ -863,12 +1054,19 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         return;
       }
 
+      final selectedRevision = await _pickDriveRevision();
+      if (selectedRevision == null) return;
+
       await _showLoadingDialog("Downloading backup from Google Drive...");
       final tempDir = await getTemporaryDirectory();
-      final String savePath = p.join(tempDir.path, _fullBackupZipFileName);
+      final String savePath = p.join(
+        tempDir.path,
+        '$_fullBackupZipFileName.${selectedRevision.id}.zip',
+      );
       int lastTotal = 0;
-      downloaded = await _googleDriveService.downloadFile(
+      downloaded = await _googleDriveService.downloadFileRevisionByName(
         _fullBackupZipFileName,
+        selectedRevision.id,
         savePath,
         onProgress: (fraction, sent, total) {
           lastTotal = total > 0 ? total : lastTotal;

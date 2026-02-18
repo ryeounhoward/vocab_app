@@ -48,6 +48,13 @@ class GoogleDriveService {
   static Object? _lastSignInError;
   static Object? get lastSignInError => _lastSignInError;
 
+  int _parseSizeBytes(Object? raw) {
+    if (raw == null) return 0;
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw.toString()) ?? 0;
+  }
+
   Stream<GoogleSignInAccount?> get onCurrentUserChanged =>
       _googleSignIn.onCurrentUserChanged;
 
@@ -175,7 +182,7 @@ class GoogleDriveService {
             (f) => DriveFileVersion(
               id: f.id!,
               name: f.name ?? fileName,
-              sizeBytes: int.tryParse(f.size ?? '') ?? 0,
+              sizeBytes: _parseSizeBytes(f.size),
               modifiedTime: f.modifiedTime,
             ),
           )
@@ -221,7 +228,7 @@ class GoogleDriveService {
               .map(
                 (r) => DriveFileRevision(
                   id: r.id!,
-                  sizeBytes: int.tryParse(r.size ?? '') ?? 0,
+                  sizeBytes: _parseSizeBytes(r.size),
                   modifiedTime: r.modifiedTime,
                   keepForever: r.keepForever ?? false,
                 ),
@@ -326,11 +333,75 @@ class GoogleDriveService {
       final selected = fileList.files!.first;
       final fileId = selected.id!;
 
-      final int totalBytes = int.tryParse(selected.size ?? '') ?? 0;
+      final int totalBytes = _parseSizeBytes(selected.size);
 
       final drive.Media media =
           await driveApi.files.get(
                 fileId,
+                downloadOptions: drive.DownloadOptions.fullMedia,
+              )
+              as drive.Media;
+
+      final localFile = File(savePath);
+      final sink = localFile.openWrite();
+      int receivedBytes = 0;
+      onProgress?.call(0.0, 0, totalBytes);
+      try {
+        await for (final chunk in media.stream) {
+          receivedBytes += chunk.length;
+          sink.add(chunk);
+
+          final double fraction = totalBytes > 0
+              ? (receivedBytes / totalBytes)
+              : 0.0;
+          onProgress?.call(fraction, receivedBytes, totalBytes);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+
+      final double finalFraction = totalBytes > 0 ? 1.0 : 0.0;
+      onProgress?.call(finalFraction, receivedBytes, totalBytes);
+
+      return localFile;
+    }, interactive: interactive);
+  }
+
+  Future<File?> downloadFileRevisionByName(
+    String fileName,
+    String revisionId,
+    String savePath, {
+    void Function(double fraction, int receivedBytes, int totalBytes)?
+    onProgress,
+    bool interactive = true,
+  }) async {
+    return _withDriveApiRetry<File?>((driveApi) async {
+      final fileList = await driveApi.files.list(
+        q: "name = '$fileName' and trashed = false",
+        pageSize: 1,
+        $fields: "files(id)",
+      );
+
+      if (fileList.files == null || fileList.files!.isEmpty) return null;
+
+      final fileId = fileList.files!.first.id;
+      if (fileId == null || fileId.isEmpty) return null;
+
+      int totalBytes = 0;
+      try {
+        final drive.Revision rev =
+            await driveApi.revisions.get(fileId, revisionId, $fields: 'id,size')
+                as drive.Revision;
+        totalBytes = _parseSizeBytes(rev.size);
+      } catch (_) {
+        totalBytes = 0;
+      }
+
+      final drive.Media media =
+          await driveApi.revisions.get(
+                fileId,
+                revisionId,
                 downloadOptions: drive.DownloadOptions.fullMedia,
               )
               as drive.Media;

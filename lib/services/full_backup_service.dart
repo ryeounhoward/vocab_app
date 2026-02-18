@@ -14,6 +14,7 @@ class FullBackupService {
   final DBHelper _dbHelper;
 
   static const String fullBackupZipFileName = 'app_full_backup.zip';
+  static const String cheatSheetPrefsKey = 'cheat_sheet_docs_v1';
 
   Future<File?> buildFullBackupZipToTemp({
     void Function(double fraction, String label)? onProgress,
@@ -31,10 +32,6 @@ class FullBackupService {
     );
 
     progress(0.05);
-
-    if (vocabData.isEmpty && idiomData.isEmpty) {
-      return null;
-    }
 
     // Read sort-words related preferences to include in backup
     final String? quizUseAll = await _dbHelper.getPreference(
@@ -90,6 +87,28 @@ class FullBackupService {
     final List<Map<String, dynamic>> notes = await _dbHelper.queryAll('notes');
     backupPayload['notes'] = notes;
 
+    // Include cheat sheet metadata from SharedPreferences
+    List<dynamic> cheatSheetDocs = const [];
+    final String? cheatSheetRaw = prefs.getString(cheatSheetPrefsKey);
+    if (cheatSheetRaw != null && cheatSheetRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(cheatSheetRaw);
+        if (decoded is List) {
+          cheatSheetDocs = decoded;
+        }
+      } catch (_) {}
+    }
+    if (cheatSheetDocs.isNotEmpty) {
+      backupPayload['cheat_sheet_docs'] = cheatSheetDocs;
+    }
+
+    if (vocabData.isEmpty &&
+        idiomData.isEmpty &&
+        notes.isEmpty &&
+        cheatSheetDocs.isEmpty) {
+      return null;
+    }
+
     final String jsonString = jsonEncode(backupPayload);
     final List<int> jsonBytes = utf8.encode(jsonString);
 
@@ -115,33 +134,49 @@ class FullBackupService {
     );
     encoder.addArchiveFile(jsonArchiveFile);
 
-    // Add Photos
+    // Add Photos + Cheat Sheet files
     progress(0.20);
+    final List<MapEntry<File, String>> filesToZip = [];
+
     final String imagesPath = await _getLocalImagesPath();
     final Directory imgDir = Directory(imagesPath);
     if (await imgDir.exists()) {
-      final List<File> files = await imgDir
+      final imageFiles = await imgDir
           .list(followLinks: false)
           .where((entity) => entity is File)
           .cast<File>()
           .toList();
-
-      final int totalFiles = files.length;
-      int processed = 0;
-
-      for (final File file in files) {
-        processed++;
-        final String filename = p.basename(file.path);
-        await encoder.addFile(file, 'images/$filename');
-
-        if (totalFiles > 0) {
-          final double photoFraction = processed / totalFiles;
-          final double overallFraction = 0.20 + (photoFraction * 0.70);
-          progress(overallFraction);
-        }
-
-        await Future.delayed(const Duration(milliseconds: 10));
+      for (final file in imageFiles) {
+        filesToZip.add(MapEntry(file, 'images/${p.basename(file.path)}'));
       }
+    }
+
+    final String cheatSheetsPath = await _getCheatSheetsPath();
+    final Directory cheatDir = Directory(cheatSheetsPath);
+    if (await cheatDir.exists()) {
+      final cheatFiles = await cheatDir
+          .list(followLinks: false)
+          .where((entity) => entity is File)
+          .cast<File>()
+          .toList();
+      for (final file in cheatFiles) {
+        filesToZip.add(MapEntry(file, 'cheat_sheets/${p.basename(file.path)}'));
+      }
+    }
+
+    final int totalFiles = filesToZip.length;
+    int processed = 0;
+    for (final entry in filesToZip) {
+      processed++;
+      await encoder.addFile(entry.key, entry.value);
+
+      if (totalFiles > 0) {
+        final double fileFraction = processed / totalFiles;
+        final double overallFraction = 0.20 + (fileFraction * 0.68);
+        progress(overallFraction);
+      }
+
+      await Future.delayed(const Duration(milliseconds: 10));
     }
 
     progress(0.93);
@@ -154,6 +189,16 @@ class FullBackupService {
   Future<String> _getLocalImagesPath() async {
     final directory = await getApplicationDocumentsDirectory();
     final path = p.join(directory.path, "images");
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return path;
+  }
+
+  Future<String> _getCheatSheetsPath() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final path = p.join(directory.path, "cheat_sheets");
     final dir = Directory(path);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
