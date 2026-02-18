@@ -12,6 +12,7 @@ import 'voice_selection_page.dart';
 import 'practice_preferences_page.dart';
 import 'sort_data_page.dart';
 import 'profile_page.dart';
+import 'manage_cheat_sheet_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -93,6 +94,13 @@ class _SettingsPageState extends State<SettingsPage> {
               subtitle: const Text("Add, edit, or delete your idioms"),
               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () => _navigateTo(context, const ManageIdiomsPage()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.fact_check, color: Colors.indigo),
+              title: const Text("Manage Cheat Sheet"),
+              subtitle: const Text("Add, edit, or delete PDF and HTML files"),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () => _navigateTo(context, const ManageCheatSheetPage()),
             ),
 
             // --- FIXED: Removed 'const' from SortDataPage() ---

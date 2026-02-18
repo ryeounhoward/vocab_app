@@ -96,20 +96,23 @@ class _CheatSheetHtmlPreviewPageState extends State<CheatSheetHtmlPreviewPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
-      body: _error != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(_error!, textAlign: TextAlign.center),
+      body: SafeArea(
+        child: _error != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(_error!, textAlign: TextAlign.center),
+                ),
+              )
+            : Stack(
+                children: [
+                  if (_controller != null)
+                    WebViewWidget(controller: _controller!),
+                  if (_loading)
+                    const Center(child: CircularProgressIndicator()),
+                ],
               ),
-            )
-          : Stack(
-              children: [
-                if (_controller != null)
-                  WebViewWidget(controller: _controller!),
-                if (_loading) const Center(child: CircularProgressIndicator()),
-              ],
-            ),
+      ),
     );
   }
 }
