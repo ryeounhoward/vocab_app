@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import 'add_edit_page.dart';
 import 'word_detail_page.dart';
@@ -20,6 +21,7 @@ class _ManageDataPageState extends State<ManageDataPage> {
   final dbHelper = DBHelper();
   bool _isLoading = true;
   bool _isAscending = true; // sort order for list
+  bool _showTenseByDefault = false;
 
   // Keep track of keys for each item to control them from here
   final Map<int, GlobalKey<SlidingTitleState>> _titleKeys = {};
@@ -32,7 +34,25 @@ class _ManageDataPageState extends State<ManageDataPage> {
   @override
   void initState() {
     super.initState();
+    _loadSettings();
     _refreshData();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _showTenseByDefault = prefs.getBool('show_tenses_by_default') ?? false;
+    });
+  }
+
+  Future<void> _updateTenseDefault(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_tenses_by_default', value);
+    if (!mounted) return;
+    setState(() {
+      _showTenseByDefault = value;
+    });
   }
 
   void _refreshData() async {
@@ -170,11 +190,30 @@ class _ManageDataPageState extends State<ManageDataPage> {
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 8,
+                    vertical: 10,
                   ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      TextButton.icon(
+                        onPressed: () =>
+                            _updateTenseDefault(!_showTenseByDefault),
+                        icon: Icon(
+                          _showTenseByDefault
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 18,
+                          color: _showTenseByDefault
+                              ? Colors.indigo
+                              : Colors.grey,
+                        ),
+                        label: Text(
+                          _showTenseByDefault
+                              ? 'Show Tenses: On'
+                              : 'Show Tenses: Off',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
                       TextButton.icon(
                         onPressed: _toggleSortOrder,
                         icon: Icon(

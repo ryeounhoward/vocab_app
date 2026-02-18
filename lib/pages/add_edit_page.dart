@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database/db_helper.dart';
 import '../services/ai_defaults.dart';
 import 'word_groups_page.dart';
@@ -57,7 +58,7 @@ class _AddEditPageState extends State<AddEditPage> {
   String? _wordType = 'Noun';
   String? _imagePath;
   bool _isDownloading = false;
-  bool _showTenseConjugationForm = true;
+  bool _showTenseConjugationForm = false;
 
   // Word group selection
   List<Map<String, dynamic>> _wordGroups = [];
@@ -80,6 +81,7 @@ class _AddEditPageState extends State<AddEditPage> {
   @override
   void initState() {
     super.initState();
+    _loadTenseDefaultPreference();
     _tenseConjugationControllers = {
       for (final tense in _tenseOrder) tense: TextEditingController(),
     };
@@ -128,6 +130,15 @@ class _AddEditPageState extends State<AddEditPage> {
         } catch (_) {}
       }
     }
+  }
+
+  Future<void> _loadTenseDefaultPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool showByDefault = prefs.getBool('show_tenses_by_default') ?? false;
+    if (!mounted) return;
+    setState(() {
+      _showTenseConjugationForm = showByDefault;
+    });
   }
 
   @override

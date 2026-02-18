@@ -28,6 +28,7 @@ class _WordDetailPageState extends State<WordDetailPage> {
     'Future Perfect',
   ];
   static const Color _tenseAccentColor = Colors.indigo;
+  bool _isTenseExpanded = false;
 
   // FIX 1: Add a variable to store the preferred voice
   Map<String, String>? _currentVoice;
@@ -36,7 +37,17 @@ class _WordDetailPageState extends State<WordDetailPage> {
   void initState() {
     super.initState();
     currentItem = widget.item;
+    _loadTenseDefaultPreference();
     _initTts();
+  }
+
+  Future<void> _loadTenseDefaultPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool showByDefault = prefs.getBool('show_tenses_by_default') ?? false;
+    if (!mounted) return;
+    setState(() {
+      _isTenseExpanded = showByDefault;
+    });
   }
 
   void _initTts() async {
@@ -328,100 +339,6 @@ class _WordDetailPageState extends State<WordDetailPage> {
                             const SizedBox(height: 20),
                           ],
 
-                          if (tenseData.isNotEmpty) ...[
-                            const Text(
-                              "Tense / Form Conjugation",
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.indigo,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            ..._tenseOrder
-                                .where((t) => tenseData.containsKey(t))
-                                .map(
-                                  (tense) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '$tense:',
-                                          style: const TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                        if ((tenseData[tense]?['conjugation'] ??
-                                                '')
-                                            .isNotEmpty) ...[
-                                          const SizedBox(height: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _tenseAccentColor,
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              tenseData[tense]?['conjugation'] ??
-                                                  '',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                        if ((tenseData[tense]?['example'] ?? '')
-                                            .isNotEmpty) ...[
-                                          const SizedBox(height: 8),
-                                          Container(
-                                            width: double.infinity,
-                                            padding: const EdgeInsets.fromLTRB(
-                                              10,
-                                              8,
-                                              10,
-                                              8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              border: const Border(
-                                                left: BorderSide(
-                                                  color: _tenseAccentColor,
-                                                  width: 4,
-                                                ),
-                                              ),
-                                              color: _tenseAccentColor
-                                                  .withOpacity(0.06),
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              tenseData[tense]?['example'] ??
-                                                  '',
-                                              style: const TextStyle(
-                                                fontSize: 15,
-                                                fontStyle: FontStyle.italic,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            const SizedBox(height: 8),
-                          ],
-
-                          const SizedBox(height: 5),
                           if (examplesList.isNotEmpty) ...[
                             const Text(
                               "Examples",
@@ -431,20 +348,160 @@ class _WordDetailPageState extends State<WordDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            ...examplesList
-                                .map(
-                                  (example) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 8.0),
-                                    child: Text(
-                                      "• $example",
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontStyle: FontStyle.italic,
+                            ...examplesList.asMap().entries.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 10.0),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    10,
+                                    8,
+                                    10,
+                                    8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    border: const Border(
+                                      left: BorderSide(
+                                        color: Colors.green,
+                                        width: 4,
                                       ),
                                     ),
+                                    color: Colors.green.withOpacity(0.06),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
-                                )
-                                .toList(),
+                                  child: Text(
+                                    entry.value,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontStyle: FontStyle.italic,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+
+                          if (tenseData.isNotEmpty) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "Tense / Form Conjugation",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo,
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _isTenseExpanded = !_isTenseExpanded;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _isTenseExpanded
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.keyboard_arrow_down,
+                                    size: 20,
+                                  ),
+                                  label: Text(
+                                    _isTenseExpanded ? 'Hide' : 'Show',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_isTenseExpanded) ...[
+                              const SizedBox(height: 10),
+                              ..._tenseOrder
+                                  .where((t) => tenseData.containsKey(t))
+                                  .map(
+                                    (tense) => Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 12,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '$tense:',
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                          if ((tenseData[tense]?['conjugation'] ??
+                                                  '')
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 6),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: _tenseAccentColor,
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                tenseData[tense]?['conjugation'] ??
+                                                    '',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          if ((tenseData[tense]?['example'] ??
+                                                  '')
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 8),
+                                            Container(
+                                              width: double.infinity,
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                    10,
+                                                    8,
+                                                    10,
+                                                    8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                border: const Border(
+                                                  left: BorderSide(
+                                                    color: _tenseAccentColor,
+                                                    width: 4,
+                                                  ),
+                                                ),
+                                                color: _tenseAccentColor
+                                                    .withOpacity(0.06),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                tenseData[tense]?['example'] ??
+                                                    '',
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  fontStyle: FontStyle.italic,
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              const SizedBox(height: 8),
+                            ],
                           ],
                         ],
                       ),
