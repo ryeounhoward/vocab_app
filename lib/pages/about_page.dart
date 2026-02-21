@@ -32,16 +32,11 @@ class _AboutPageState extends State<AboutPage> {
   static const String _facebookUrl = 'https://www.facebook.com/ryeounhoward23/';
   static const String _githubUrl = 'https://github.com/ryeounhoward/vocab_app';
 
-  static final DateTime _examDate = DateTime(2026, 3, 8);
-  Duration _timeLeft = Duration.zero;
-  Timer? _countdownTimer;
-
   @override
   void initState() {
     super.initState();
     _loadAppVersion();
     _loadStorageInfo();
-    _startCountdown();
   }
 
   Future<void> _loadAppVersion() async {
@@ -192,26 +187,6 @@ class _AboutPageState extends State<AboutPage> {
     } catch (_) {}
   }
 
-  void _startCountdown() {
-    void update() {
-      final diff = _examDate.difference(DateTime.now());
-      if (!mounted) return;
-      setState(() => _timeLeft = diff.isNegative ? Duration.zero : diff);
-    }
-
-    update();
-    _countdownTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (t) => update(),
-    );
-  }
-
-  @override
-  void dispose() {
-    _countdownTimer?.cancel();
-    super.dispose();
-  }
-
   Widget _buildInfoRow(String label, Widget valueWidget) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
@@ -230,11 +205,6 @@ class _AboutPageState extends State<AboutPage> {
 
   @override
   Widget build(BuildContext context) {
-    final int days = _timeLeft.inDays;
-    final int hours = _timeLeft.inHours % 24;
-    final int minutes = _timeLeft.inMinutes % 60;
-    final int seconds = _timeLeft.inSeconds % 60;
-
     return Scaffold(
       appBar: AppBar(title: const Text('About'), centerTitle: true),
       body: SingleChildScrollView(
@@ -242,11 +212,7 @@ class _AboutPageState extends State<AboutPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Countdown
-            _buildCountdownSection(days, hours, minutes, seconds),
-            const SizedBox(height: 24),
-
-            // 2. Disclaimer
+            // 1. Disclaimer
             const Text(
               'Disclaimer',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -262,7 +228,7 @@ class _AboutPageState extends State<AboutPage> {
             ),
             const SizedBox(height: 24),
 
-            // 3. App Information
+            // 2. App Information
             const Text(
               'App Information',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -359,7 +325,7 @@ class _AboutPageState extends State<AboutPage> {
             const SizedBox(height: 24),
             const Divider(),
 
-            // 4. Social Links
+            // 3. Social Links
             _buildLinkTile(
               'assets/images/Google_Drive_icon_(2020).svg',
               'Civil Service Reviewer',
@@ -374,66 +340,6 @@ class _AboutPageState extends State<AboutPage> {
               'assets/images/Octicons-mark-github.svg',
               'GitHub Repository',
               () => _openUrl(_githubUrl),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCountdownSection(int d, int h, int m, int s) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.indigo.shade50,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Exam Countdown',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildCountdownBox('$d', 'Days'),
-              const SizedBox(width: 8),
-              _buildCountdownBox('$h', 'Hours'),
-              const SizedBox(width: 8),
-              _buildCountdownBox('$m', 'Mins'),
-              const SizedBox(width: 8),
-              _buildCountdownBox('$s', 'Secs'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCountdownBox(String value, String label) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.indigo,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 10, color: Colors.white70),
             ),
           ],
         ),

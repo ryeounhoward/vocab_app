@@ -12,17 +12,28 @@ class DBHelper {
   static const String tableIdiomGroups = "idiom_groups";
   static const String tableIdiomGroupItems = "idiom_group_items";
   static const String tablePreferences = "app_preferences";
+  static const String tableNotifications = "notifications";
 
   // NEW: Notes Table Name
   static const String tableNotes = "notes";
 
-  Future<bool> _columnExists(
-    Database db,
-    String table,
-    String column,
-  ) async {
+  Future<bool> _columnExists(Database db, String table, String column) async {
     final result = await db.rawQuery('PRAGMA table_info($table)');
     return result.any((row) => row['name'] == column);
+  }
+
+  Future<void> _ensureNotificationsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableNotifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        body TEXT,
+        route TEXT,
+        route_args TEXT,
+        created_at INTEGER,
+        read INTEGER DEFAULT 0
+      )
+    ''');
   }
 
   Future<Database> get db async {
@@ -35,8 +46,8 @@ class DBHelper {
     String path = join(await getDatabasesPath(), "vocab.db");
     return await openDatabase(
       path,
-      // NEW: Incremented version to 13 to add related forms for vocabulary
-      version: 13,
+      // NEW: Incremented version to 14 to add notifications table
+      version: 14,
       onCreate: (db, version) async {
         // Create Vocabulary Table
         await db.execute('''
@@ -118,6 +129,19 @@ class DBHelper {
           content TEXT,
           color INTEGER,
           date TEXT
+        )
+        ''');
+
+        // NEW: Create Notifications Table
+        await db.execute('''
+        CREATE TABLE $tableNotifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT,
+          body TEXT,
+          route TEXT,
+          route_args TEXT,
+          created_at INTEGER,
+          read INTEGER DEFAULT 0
         )
         ''');
       },
@@ -224,6 +248,21 @@ class DBHelper {
             );
           }
         }
+
+        // NEW: Upgrade logic for Version 14 (Notifications)
+        if (oldVersion < 14) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS $tableNotifications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT,
+              body TEXT,
+              route TEXT,
+              route_args TEXT,
+              created_at INTEGER,
+              read INTEGER DEFAULT 0
+            )
+          ''');
+        }
       },
     );
   }
@@ -314,6 +353,49 @@ class DBHelper {
   Future<int> deleteNote(int id) async {
     final dbClient = await db;
     return await dbClient.delete(tableNotes, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- NOTIFICATIONS ---
+
+  Future<int> insertNotification(Map<String, dynamic> notification) async {
+    final dbClient = await db;
+    await _ensureNotificationsTable(dbClient);
+    return await dbClient.insert(tableNotifications, notification);
+  }
+
+  Future<List<Map<String, dynamic>>> getAllNotifications() async {
+    final dbClient = await db;
+    await _ensureNotificationsTable(dbClient);
+    return await dbClient.query(
+      tableNotifications,
+      orderBy: 'created_at DESC, id DESC',
+    );
+  }
+
+  Future<int> markNotificationRead(int id) async {
+    final dbClient = await db;
+    await _ensureNotificationsTable(dbClient);
+    return await dbClient.update(
+      tableNotifications,
+      {'read': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> markAllNotificationsRead() async {
+    final dbClient = await db;
+    await _ensureNotificationsTable(dbClient);
+    return await dbClient.update(tableNotifications, {'read': 1});
+  }
+
+  Future<int> getUnreadNotificationCount() async {
+    final dbClient = await db;
+    await _ensureNotificationsTable(dbClient);
+    final result = await dbClient.rawQuery(
+      'SELECT COUNT(*) as count FROM $tableNotifications WHERE read = 0',
+    );
+    return (result.first['count'] as int?) ?? 0;
   }
 
   // --- APP PREFERENCES (KEY-VALUE) ---

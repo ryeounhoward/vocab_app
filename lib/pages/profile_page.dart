@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../database/db_helper.dart';
 import 'google_drive_Service.dart';
+import 'review_page.dart';
+import 'favorite_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -21,6 +24,10 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isLoading = false;
   bool _isSavingBio = false;
   bool _isLoadingBio = false;
+  bool _isLoadingNotifications = false;
+  List<Map<String, dynamic>> _notifications = <Map<String, dynamic>>[];
+  int _notificationPage = 0;
+  static const int _notificationsPerPage = 5;
 
   StreamSubscription<GoogleSignInAccount?>? _accountSub;
   final TextEditingController _bioController = TextEditingController();
@@ -48,9 +55,11 @@ class _ProfilePageState extends State<ProfilePage> {
       _isLoading = false;
       // Load bio from local cache only; Drive sync happens on pull-to-refresh.
       _handleAccountChanged(existingUser, silent: true);
+      _loadNotifications();
     } else {
       // Only show loading if we really don't have a user yet
       _loadProfile();
+      _loadNotifications();
     }
   }
 
@@ -160,6 +169,85 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _refreshProfile() async {
     await _loadProfile();
     await _syncBioFromDrive(showLoading: false);
+    await _loadNotifications();
+  }
+
+  Future<void> _loadNotifications() async {
+    if (!mounted) return;
+    setState(() => _isLoadingNotifications = true);
+    final rows = await _dbHelper.getAllNotifications();
+    if (!mounted) return;
+    setState(() {
+      _notifications = rows;
+      _isLoadingNotifications = false;
+    });
+  }
+
+  Future<void> _markAllNotificationsRead() async {
+    await _dbHelper.markAllNotificationsRead();
+    await _loadNotifications();
+  }
+
+  void _nextNotificationPage() {
+    final totalPages = _totalNotificationPages();
+    if (_notificationPage + 1 >= totalPages) return;
+    setState(() => _notificationPage += 1);
+  }
+
+  void _previousNotificationPage() {
+    if (_notificationPage == 0) return;
+    setState(() => _notificationPage -= 1);
+  }
+
+  int _totalNotificationPages() {
+    if (_notifications.isEmpty) return 1;
+    return (_notifications.length / _notificationsPerPage).ceil();
+  }
+
+  List<Map<String, dynamic>> _currentNotificationPageItems() {
+    final start = _notificationPage * _notificationsPerPage;
+    if (start >= _notifications.length) return <Map<String, dynamic>>[];
+    final end = (start + _notificationsPerPage).clamp(0, _notifications.length);
+    return _notifications.sublist(start, end);
+  }
+
+  int _unreadNotificationCount() {
+    return _notifications
+        .where((notification) => (notification['read'] ?? 0) != 1)
+        .length;
+  }
+
+  Future<void> _openNotification(Map<String, dynamic> notification) async {
+    final int? id = notification['id'] as int?;
+    if (id != null) {
+      await _dbHelper.markNotificationRead(id);
+    }
+
+    final route = (notification['route'] ?? '').toString();
+    final routeArgs = (notification['route_args'] ?? '').toString();
+    if (route == 'review' && routeArgs.isNotEmpty) {
+      final data = jsonDecode(routeArgs);
+      final int? itemId = data['id'] as int?;
+      final String? table = data['table'] as String?;
+      if (itemId != null && table != null) {
+        if (!mounted) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                ReviewPage(selectedId: itemId, originTable: table),
+          ),
+        );
+      }
+    } else if (route == 'favorites') {
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const FavoritesPage()),
+      );
+    }
+
+    await _loadNotifications();
   }
 
   Future<void> _login() async {
@@ -434,31 +522,44 @@ class _ProfilePageState extends State<ProfilePage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (isSigningInOrRestoring)
-                          const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else
-                          Image.asset(
-                            _googleIconAssetPath,
-                            width: 22,
-                            height: 22,
-                            errorBuilder: (_, _, _) => const Icon(Icons.login),
-                          ),
-                        const SizedBox(width: 10),
-                        Text(
-                          isSigningInOrRestoring
-                              ? 'Signing in…'
-                              : 'Sign in with Google',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (isSigningInOrRestoring)
+                              const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            else
+                              Image.asset(
+                                _googleIconAssetPath,
+                                width: 22,
+                                height: 22,
+                                errorBuilder: (_, _, _) =>
+                                    const Icon(Icons.login),
+                              ),
+                            const SizedBox(width: 10),
+                            Text(
+                              isSigningInOrRestoring
+                                  ? 'Signing in…'
+                                  : 'Sign in with Google',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Back up and sync your data.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                       ],
                     ),
@@ -562,6 +663,178 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ],
+
+              // 4. Notifications
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Notifications',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _notifications.isEmpty
+                                  ? null
+                                  : _markAllNotificationsRead,
+                              child: Text(
+                                _unreadNotificationCount() > 0
+                                    ? 'Mark all read (${_unreadNotificationCount()})'
+                                    : 'Mark all read',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      if (_isLoadingNotifications)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 16),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        )
+                      else if (_notifications.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(
+                            left: 16,
+                            right: 16,
+                            bottom: 16,
+                          ),
+                          child: Text(
+                            'No notifications yet.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      else
+                        Column(
+                          children: [
+                            ..._currentNotificationPageItems().map((
+                              notification,
+                            ) {
+                              final String title = (notification['title'] ?? '')
+                                  .toString();
+                              final String body = (notification['body'] ?? '')
+                                  .toString();
+                              final bool isRead =
+                                  (notification['read'] ?? 0) == 1;
+                              return Column(
+                                children: [
+                                  Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () =>
+                                          _openNotification(notification),
+                                      hoverColor: Colors.grey.withOpacity(0.08),
+                                      child: SizedBox(
+                                        width: double.infinity,
+                                        child: ListTile(
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                              ),
+                                          title: Text(
+                                            title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontWeight: isRead
+                                                  ? FontWeight.w500
+                                                  : FontWeight.w700,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            body,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          trailing: isRead
+                                              ? null
+                                              : const Icon(
+                                                  Icons.circle,
+                                                  size: 8,
+                                                  color: Colors.indigo,
+                                                ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const Divider(height: 1),
+                                ],
+                              );
+                            }),
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: _notificationPage == 0
+                                          ? null
+                                          : _previousNotificationPage,
+                                      child: const Text('Previous'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed:
+                                          _notificationPage + 1 >=
+                                              _totalNotificationPages()
+                                          ? null
+                                          : _nextNotificationPage,
+                                      child: const Text('Next'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  'Page ${_notificationPage + 1} of ${_totalNotificationPages()}',
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
             ],
           ),

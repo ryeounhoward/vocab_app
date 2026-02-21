@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import '../services/notification_service.dart';
+import '../database/db_helper.dart';
 
 class WordOfDayPage extends StatefulWidget {
   const WordOfDayPage({super.key});
@@ -98,6 +99,19 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
   }
 
   void _testNotification() async {
+    final dbHelper = DBHelper();
+    final words = await dbHelper.queryAll(DBHelper.tableVocab);
+    if (words.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Add vocabulary first to test.')),
+        );
+      }
+      return;
+    }
+
+    await NotificationService.init();
+    await NotificationService.requestPermissions();
     await NotificationService.showWordNotification(count: _wordCount);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -231,23 +245,23 @@ class _WordOfDayPageState extends State<WordOfDayPage> {
             ),
           ),
           const SizedBox(height: 15),
-          // SizedBox(
-          //   height: 55,
-          //   child: OutlinedButton(
-          //     style: OutlinedButton.styleFrom(
-          //       side: const BorderSide(color: Colors.indigo),
-          //       foregroundColor: Colors.indigo,
-          //       shape: RoundedRectangleBorder(
-          //         borderRadius: BorderRadius.circular(8),
-          //       ),
-          //     ),
-          //     onPressed: _testNotification,
-          //     child: const Text(
-          //       "TEST NOTIFICATION NOW",
-          //       style: TextStyle(fontWeight: FontWeight.bold),
-          //     ),
-          //   ),
-          // ),
+          SizedBox(
+            height: 55,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.indigo),
+                foregroundColor: Colors.indigo,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: _testNotification,
+              child: const Text(
+                "TEST NOTIFICATION NOW",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
         ],
       ),
     );

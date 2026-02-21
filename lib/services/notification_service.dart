@@ -134,6 +134,7 @@ class NotificationService {
     Map<String, dynamic> wordItem,
     int index,
   ) async {
+    final dbHelper = DBHelper();
     String wordTitle =
         "${wordItem['word']} (${wordItem['word_type'] ?? 'word'})";
     String description = wordItem['description'] ?? "No meaning provided.";
@@ -151,6 +152,15 @@ class NotificationService {
     String payload = jsonEncode({
       'id': wordItem['id'],
       'table': DBHelper.tableVocab,
+    });
+
+    await dbHelper.insertNotification({
+      'title': wordTitle,
+      'body': description,
+      'route': 'review',
+      'route_args': payload,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'read': 0,
     });
 
     final AndroidNotificationDetails androidDetails =
